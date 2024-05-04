@@ -45,9 +45,9 @@ tools/xgm rom builder
 /.idea
 *.iml
 lib/libmd.a
+lib/libmd_debug.a
 res/libres.h
 src/ext/minimusic/minimus_drv.s
-lib/libmd_debug.a
 src/snd/drv_null.s
 src/snd/drv_xgm.s
 src/snd/pcm/drv_dpcm2.s
