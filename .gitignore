@@ -44,3 +44,6 @@ tools/rescomp/rescomp.jar
 tools/xgm rom builder
 /.idea
 *.iml
+/lib/libmd*a
+/res/libres.h
+/src/ext/minimus_drv.s

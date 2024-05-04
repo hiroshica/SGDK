@@ -1,4 +1,4 @@
-#include "config.h"
+      #include "config.h"
 #include "types.h"
 
 #if      !LEGACY_SPRITE_ENGINE
@@ -261,7 +261,7 @@ static Sprite* allocateSprite(u16 head)
 
     // mark as allocated --> this is done after allocate call, not needed here
     // result->status = ALLOCATED;
-
+    result->spr_mode = SPR_NONE;
     return result;
 }
 
@@ -1474,115 +1474,124 @@ void NO_INLINE SPR_update()
             // so visibility also allow to get the number of sprite
             visibility &= visibilityMask[frame->numSprite];
 
-            switch(attr & (TILE_ATTR_VFLIP_MASK | TILE_ATTR_HFLIP_MASK))
+            // spr_mode select function
+            if(sprite->spr_mode == SPR_NONE)
             {
-                case 0:
-                    while(visibility)
-                    {
-                        // current sprite visibility bit is in high bit
-                        if (visibility & 0x8000)
+                switch(attr & (TILE_ATTR_VFLIP_MASK | TILE_ATTR_HFLIP_MASK))
+                {
+                    case 0:
+                        while(visibility)
                         {
-                            vdpSprite->y = sprite->y + frameSprite->offsetY;
-                            vdpSprite->size = frameSprite->size;
-                            vdpSprite->link = vdpSpriteInd++;
-                            vdpSprite->attribut = attr;
-                            vdpSprite->x = sprite->x + frameSprite->offsetX;
-                            vdpSprite++;
+                            // current sprite visibility bit is in high bit
+                            if (visibility & 0x8000)
+                            {
+                                vdpSprite->y = sprite->y + frameSprite->offsetY;
+                                vdpSprite->size = frameSprite->size;
+                                vdpSprite->link = vdpSpriteInd++;
+                                vdpSprite->attribut = attr;
+                                vdpSprite->x = sprite->x + frameSprite->offsetX;
+                                vdpSprite++;
+                            }
+
+                            // increment tile index in attribut field
+                            attr += frameSprite->numTile;
+                            // next
+                            frameSprite++;
+                            // next VDP sprite
+                            visibility <<= 1;
+
+    #ifdef SPR_DEBUG
+                            logVDPSprite(vdpSpriteInd - 1);
+    #endif // SPR_DEBUG
                         }
+                        break;
 
-                        // increment tile index in attribut field
-                        attr += frameSprite->numTile;
-                        // next
-                        frameSprite++;
-                        // next VDP sprite
-                        visibility <<= 1;
-
-#ifdef SPR_DEBUG
-                        logVDPSprite(vdpSpriteInd - 1);
-#endif // SPR_DEBUG
-                    }
-                    break;
-
-                case TILE_ATTR_HFLIP_MASK:
-                    while(visibility)
-                    {
-                        // current sprite visibility bit is in high bit
-                        if (visibility & 0x8000)
+                    case TILE_ATTR_HFLIP_MASK:
+                        while(visibility)
                         {
-                            vdpSprite->y = sprite->y + frameSprite->offsetY;
-                            vdpSprite->size = frameSprite->size;
-                            vdpSprite->link = vdpSpriteInd++;
-                            vdpSprite->attribut = attr;
-                            vdpSprite->x = sprite->x + frameSprite->offsetXFlip;
-                            vdpSprite++;
+                            // current sprite visibility bit is in high bit
+                            if (visibility & 0x8000)
+                            {
+                                vdpSprite->y = sprite->y + frameSprite->offsetY;
+                                vdpSprite->size = frameSprite->size;
+                                vdpSprite->link = vdpSpriteInd++;
+                                vdpSprite->attribut = attr;
+                                vdpSprite->x = sprite->x + frameSprite->offsetXFlip;
+                                vdpSprite++;
+                            }
+
+                            // increment tile index in attribut field
+                            attr += frameSprite->numTile;
+                            // next
+                            frameSprite++;
+                            // next VDP sprite
+                            visibility <<= 1;
+
+    #ifdef SPR_DEBUG
+                            logVDPSprite(vdpSpriteInd - 1);
+    #endif // SPR_DEBUG
                         }
+                        break;
+                        
 
-                        // increment tile index in attribut field
-                        attr += frameSprite->numTile;
-                        // next
-                        frameSprite++;
-                        // next VDP sprite
-                        visibility <<= 1;
-
-#ifdef SPR_DEBUG
-                        logVDPSprite(vdpSpriteInd - 1);
-#endif // SPR_DEBUG
-                    }
-                    break;
-
-                case TILE_ATTR_VFLIP_MASK:
-                    while(visibility)
-                    {
-                        // current sprite visibility bit is in high bit
-                        if (visibility & 0x8000)
+                    case TILE_ATTR_VFLIP_MASK:
+                        while(visibility)
                         {
-                            vdpSprite->y = sprite->y + frameSprite->offsetYFlip;
-                            vdpSprite->size = frameSprite->size;
-                            vdpSprite->link = vdpSpriteInd++;
-                            vdpSprite->attribut = attr;
-                            vdpSprite->x = sprite->x + frameSprite->offsetX;
-                            vdpSprite++;
+                            // current sprite visibility bit is in high bit
+                            if (visibility & 0x8000)
+                            {
+                                vdpSprite->y = sprite->y + frameSprite->offsetYFlip;
+                                vdpSprite->size = frameSprite->size;
+                                vdpSprite->link = vdpSpriteInd++;
+                                vdpSprite->attribut = attr;
+                                vdpSprite->x = sprite->x + frameSprite->offsetX;
+                                vdpSprite++;
+                            }
+
+                            // increment tile index in attribut field
+                            attr += frameSprite->numTile;
+                            // next
+                            frameSprite++;
+                            // next VDP sprite
+                            visibility <<= 1;
+
+    #ifdef SPR_DEBUG
+                            logVDPSprite(vdpSpriteInd - 1);
+    #endif // SPR_DEBUG
                         }
+                        break;
 
-                        // increment tile index in attribut field
-                        attr += frameSprite->numTile;
-                        // next
-                        frameSprite++;
-                        // next VDP sprite
-                        visibility <<= 1;
-
-#ifdef SPR_DEBUG
-                        logVDPSprite(vdpSpriteInd - 1);
-#endif // SPR_DEBUG
-                    }
-                    break;
-
-                case (TILE_ATTR_VFLIP_MASK | TILE_ATTR_HFLIP_MASK):
-                    while(visibility)
-                    {
-                        // current sprite visibility bit is in high bit
-                        if (visibility & 0x8000)
+                    case (TILE_ATTR_VFLIP_MASK | TILE_ATTR_HFLIP_MASK):
+                        while(visibility)
                         {
-                            vdpSprite->y = sprite->y + frameSprite->offsetYFlip;
-                            vdpSprite->size = frameSprite->size;
-                            vdpSprite->link = vdpSpriteInd++;
-                            vdpSprite->attribut = attr;
-                            vdpSprite->x = sprite->x + frameSprite->offsetXFlip;
-                            vdpSprite++;
+                            // current sprite visibility bit is in high bit
+                            if (visibility & 0x8000)
+                            {
+                                vdpSprite->y = sprite->y + frameSprite->offsetYFlip;
+                                vdpSprite->size = frameSprite->size;
+                                vdpSprite->link = vdpSpriteInd++;
+                                vdpSprite->attribut = attr;
+                                vdpSprite->x = sprite->x + frameSprite->offsetXFlip;
+                                vdpSprite++;
+                            }
+
+                            // increment tile index in attribut field
+                            attr += frameSprite->numTile;
+                            // next
+                            frameSprite++;
+                            // next VDP sprite
+                            visibility <<= 1;
+
+    #ifdef SPR_DEBUG
+                            logVDPSprite(vdpSpriteInd - 1);
+    #endif // SPR_DEBUG
                         }
+                        break;
+                }
+            }
+            else if(sprite->spr_mode == SPR_MODE1)
+            {
 
-                        // increment tile index in attribut field
-                        attr += frameSprite->numTile;
-                        // next
-                        frameSprite++;
-                        // next VDP sprite
-                        visibility <<= 1;
-
-#ifdef SPR_DEBUG
-                        logVDPSprite(vdpSpriteInd - 1);
-#endif // SPR_DEBUG
-                    }
-                    break;
             }
         }
 

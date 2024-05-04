@@ -234,6 +234,22 @@ typedef struct
     FrameVDPSprite frameVDPSprites[];
 } AnimationFrame;
 
+typedef struct
+{
+    u16 attribute;        // H/V flip flag (use TILE_ATTR_HFLIP_MASK and TILE_ATTR_VFLIP_MASK) & size(see SPRITE_SIZE macro)
+    s16 TileOffset;
+    s16 offsetY;          // respect VDP sprite field order, may help
+    s16 offsetX;
+}  FrameVDPSpriteMode1;
+typedef struct
+{
+    u8 numSprite;
+    u8 timer;
+    TileSet* tileset;                   // TODO: have a tileset per VDP sprite --> probably not a good idea performance wise
+    Collision* collision;               // Require many DMA queue operations and fast DMA flush as well, also bring extra computing in calculating delayed update
+    FrameVDPSpriteMode1 frameVDPSpritesMode1[];
+} AnimationFrameMode1;
+
 /**
  *  \brief
  *      Sprite animation structure.
@@ -324,8 +340,14 @@ typedef struct
  *
  *  Used to manage an active sprite in game condition.
  */
+enum {
+    SPR_NONE,
+    SPR_MODE1,
+    SPR_DEFAULT = SPR_NONE,
+};
 typedef struct Sprite
 {
+    u16 spr_mode;
     u16 status;
     u16 visibility;
     const SpriteDefinition* definition;
