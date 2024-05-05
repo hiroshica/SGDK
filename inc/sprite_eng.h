@@ -238,8 +238,8 @@ typedef struct
 {
     u16 attribute;        // H/V flip flag (use TILE_ATTR_HFLIP_MASK and TILE_ATTR_VFLIP_MASK) & size(see SPRITE_SIZE macro)
     s16 TileOffset;
-    s16 offsetY;          // respect VDP sprite field order, may help
     s16 offsetX;
+    s16 offsetY;          // respect VDP sprite field order, may help
 }  FrameVDPSpriteMode1;
 typedef struct
 {

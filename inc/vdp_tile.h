@@ -64,6 +64,8 @@
  */
 #define TILE_ATTR_MASK              (TILE_ATTR_PRIORITY_MASK | TILE_ATTR_PALETTE_MASK | TILE_ATTR_VFLIP_MASK | TILE_ATTR_HFLIP_MASK)
 
+#define TILE_FLIP_MASK              (TILE_ATTR_HFLIP_MASK | TILE_ATTR_VFLIP_MASK)
+
 /**
  *  \brief
  *      Encode tile attributes for tilemap data.

@@ -1449,9 +1449,12 @@ void NO_INLINE SPR_update()
         // so we have to take care of that
         u16 visibility = (status & ALLOCATED)?sprite->visibility:0;
 
+        //kprintf("SPR_update: start");
+
         // sprite visible and still in SAT limit ?
         if (visibility && (vdpSpriteInd <= SAT_MAX_SIZE))
         {
+            //kprintf("SPR_update: in");
             static const u16 visibilityMask[17] =
             {
                 0x0000, 0x8000, 0xC000, 0xE000, 0xF000, 0xF800, 0xFC00, 0xFE00,
@@ -1466,17 +1469,18 @@ void NO_INLINE SPR_update()
                 status &= ~NEED_TILES_UPLOAD;
             }
 
-            // update SAT now
-            AnimationFrame* frame = sprite->frame;
-            FrameVDPSprite* frameSprite = frame->frameVDPSprites;
-            u16 attr = sprite->attribut;
-
-            // so visibility also allow to get the number of sprite
-            visibility &= visibilityMask[frame->numSprite];
-
+            //kprintf("SPR_update: visibility=%04x",visibility);
             // spr_mode select function
             if(sprite->spr_mode == SPR_NONE)
             {
+                // update SAT now
+                AnimationFrame* frame = sprite->frame;
+                FrameVDPSprite* frameSprite = frame->frameVDPSprites;
+                u16 attr = sprite->attribut;
+
+                // so visibility also allow to get the number of sprite
+                visibility &= visibilityMask[frame->numSprite];
+
                 switch(attr & (TILE_ATTR_VFLIP_MASK | TILE_ATTR_HFLIP_MASK))
                 {
                     case 0:
@@ -1591,6 +1595,35 @@ void NO_INLINE SPR_update()
             }
             else if(sprite->spr_mode == SPR_MODE1)
             {
+                //kprintf("SPR_update: mode1 draw");
+                AnimationFrameMode1* frame = (AnimationFrameMode1 *)sprite->frame;
+                FrameVDPSpriteMode1* frameSprite = frame->frameVDPSpritesMode1;
+                u16 attr = sprite->attribut&TILE_FLIP_MASK;
+                u16 tileoffset = sprite->attribut&0x7ff;
+                u16 ppattr = sprite->attribut&0xe000;
+                u8 nums = frame->numSprite;
+                while(nums)
+                {
+                    u16 hvattr = attr^(frameSprite->attribute&TILE_FLIP_MASK);
+                    switch (hvattr)
+                    {
+                        case TILE_ATTR_HFLIP_MASK:
+                        case TILE_ATTR_VFLIP_MASK:
+                        case TILE_FLIP_MASK:
+                        case 0:
+                            {
+                                vdpSprite->y = sprite->y + frameSprite->offsetY;
+                                vdpSprite->x = sprite->x + frameSprite->offsetX;
+                                vdpSprite->size = frameSprite->attribute&0xff;
+                                vdpSprite->link = vdpSpriteInd++;
+                                vdpSprite->attribut = (tileoffset + frameSprite->TileOffset) | hvattr | ppattr;
+                                vdpSprite++;
+                                frameSprite++;
+                            }
+                            break;
+                    }
+                    nums--;
+                }
 
             }
         }
@@ -2049,7 +2082,7 @@ static Sprite* sortSprite(Sprite* sprite)
     const s16 sdepth = sprite->depth;
 
 #ifdef SPR_DEBUG
-    KLog_U2("Start depth compare for sprite #", getSpriteIndex(sprite), " VDP Sprite Ind=", sprite->VDPSpriteIndex);
+    //KLog_U2("Start depth compare for sprite #", getSpriteIndex(sprite), " VDP Sprite Ind=", sprite->VDPSpriteIndex);
 #endif // SPR_DEBUG
 
     // find position forward first
