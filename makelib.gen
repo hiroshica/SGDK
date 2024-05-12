@@ -26,9 +26,9 @@ OBJ_LIB += $(SRC_LIB_S80:.s80=.o)
 OBJ_LIB += $(SRC_LIB_S:.s=.o)
 OBJ_LIB += $(SRC_LIB_C:.c=.o)
 
-DEP_LIB := $(OBJ_LIB:.o=.d)
+#$(warning $(OBJ_LIB))
 
--include $(DEP_LIB)
+DEP_LIB := $(OBJ_LIB:.o=.d)
 
 LST_LIB := $(SRC_LIB_C:.c=.lst)
 
@@ -62,6 +62,8 @@ Release: release
 Asm: asm
 
 .PHONY: clean
+.SUFFIXES:
+.SUFFIXES: .c .s .s80 .res .o
 
 
 cleanlst:
@@ -126,3 +128,6 @@ cmd_ : $(OBJ_LIB)
 
 %.s: %.o80
 	$(BINTOS) $<
+
+-include $(DEP_LIB)
+

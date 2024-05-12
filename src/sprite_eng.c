@@ -1605,18 +1605,57 @@ void NO_INLINE SPR_update()
                 u16 ysize = (((sprite->attribut>>0)&0x0003)+1)<<3;
                 u8 nums = frame->numSprite;
 
+
                 while(nums)
                 {
                     u16 hvattr = attr^(frameSprite->attribute&TILE_FLIP_MASK);
                     switch (hvattr)
                     {
                         case TILE_ATTR_HFLIP_MASK:
+                            {
+                                s16 offsetx = sprite->x + (xsize>>1);
+                                s16 offsety = sprite->y + (ysize>>1);
+                                vdpSprite->y = offsety + frameSprite->offsetY;
+                                vdpSprite->x = offsetx + frameSprite->offsetX;                                
+                                vdpSprite->size = frameSprite->attribute&0xff;
+                                vdpSprite->link = vdpSpriteInd++;
+                                vdpSprite->attribut = (tileoffset + frameSprite->TileOffset) | hvattr | ppattr;
+                                vdpSprite++;
+                                frameSprite++;
+                            }
+                            break;
                         case TILE_ATTR_VFLIP_MASK:
+                            {
+                s16 offsetx = sprite->x + (xsize>>1);
+                s16 offsety = sprite->y + (ysize>>1);
+                                vdpSprite->y = offsety + frameSprite->offsetY;
+                                vdpSprite->x = offsetx + frameSprite->offsetX;                                
+                                vdpSprite->size = frameSprite->attribute&0xff;
+                                vdpSprite->link = vdpSpriteInd++;
+                                vdpSprite->attribut = (tileoffset + frameSprite->TileOffset) | hvattr | ppattr;
+                                vdpSprite++;
+                                frameSprite++;
+                            }
+                            break;
                         case TILE_FLIP_MASK:
+                            {
+                s16 offsetx = sprite->x + (xsize>>1);
+                s16 offsety = sprite->y + (ysize>>1);
+                                vdpSprite->y = offsety + frameSprite->offsetY;
+                                vdpSprite->x = offsetx + frameSprite->offsetX;                                
+                                vdpSprite->size = frameSprite->attribute&0xff;
+                                vdpSprite->link = vdpSpriteInd++;
+                                vdpSprite->attribut = (tileoffset + frameSprite->TileOffset) | hvattr | ppattr;
+                                vdpSprite++;
+                                frameSprite++;
+                            }
+                            break;
                         case 0:
                             {
-                                vdpSprite->y = (sprite->y + frameSprite->offsetY) + (ysize>>1);
-                                vdpSprite->x = (sprite->x + frameSprite->offsetX) + (xsize>>1);
+                s16 offsetx = sprite->x + (xsize>>1);
+                s16 offsety = sprite->y + (ysize>>1);
+                                vdpSprite->y = offsety + frameSprite->offsetY;
+                                vdpSprite->x = offsetx + frameSprite->offsetX;                                
                                 vdpSprite->size = frameSprite->attribute&0xff;
                                 vdpSprite->link = vdpSpriteInd++;
                                 vdpSprite->attribut = (tileoffset + frameSprite->TileOffset) | hvattr | ppattr;
