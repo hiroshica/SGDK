@@ -1601,69 +1601,32 @@ void NO_INLINE SPR_update()
                 u16 attr = sprite->attribut&TILE_FLIP_MASK;
                 u16 tileoffset = sprite->attribut&0x7ff;
                 u16 ppattr = sprite->attribut&0xe000;
-                u16 xsize = (((sprite->attribut>>2)&0x0003)+1)<<3;
-                u16 ysize = (((sprite->attribut>>0)&0x0003)+1)<<3;
                 u8 nums = frame->numSprite;
 
 
                 while(nums)
                 {
                     u16 hvattr = attr^(frameSprite->attribute&TILE_FLIP_MASK);
-                    switch (hvattr)
-                    {
-                        case TILE_ATTR_HFLIP_MASK:
-                            {
-                                s16 offsetx = sprite->x + (xsize>>1);
-                                s16 offsety = sprite->y + (ysize>>1);
-                                vdpSprite->y = offsety + frameSprite->offsetY;
-                                vdpSprite->x = offsetx + frameSprite->offsetX;                                
-                                vdpSprite->size = frameSprite->attribute&0xff;
-                                vdpSprite->link = vdpSpriteInd++;
-                                vdpSprite->attribut = (tileoffset + frameSprite->TileOffset) | hvattr | ppattr;
-                                vdpSprite++;
-                                frameSprite++;
-                            }
-                            break;
-                        case TILE_ATTR_VFLIP_MASK:
-                            {
-                s16 offsetx = sprite->x + (xsize>>1);
-                s16 offsety = sprite->y + (ysize>>1);
-                                vdpSprite->y = offsety + frameSprite->offsetY;
-                                vdpSprite->x = offsetx + frameSprite->offsetX;                                
-                                vdpSprite->size = frameSprite->attribute&0xff;
-                                vdpSprite->link = vdpSpriteInd++;
-                                vdpSprite->attribut = (tileoffset + frameSprite->TileOffset) | hvattr | ppattr;
-                                vdpSprite++;
-                                frameSprite++;
-                            }
-                            break;
-                        case TILE_FLIP_MASK:
-                            {
-                s16 offsetx = sprite->x + (xsize>>1);
-                s16 offsety = sprite->y + (ysize>>1);
-                                vdpSprite->y = offsety + frameSprite->offsetY;
-                                vdpSprite->x = offsetx + frameSprite->offsetX;                                
-                                vdpSprite->size = frameSprite->attribute&0xff;
-                                vdpSprite->link = vdpSpriteInd++;
-                                vdpSprite->attribut = (tileoffset + frameSprite->TileOffset) | hvattr | ppattr;
-                                vdpSprite++;
-                                frameSprite++;
-                            }
-                            break;
-                        case 0:
-                            {
-                s16 offsetx = sprite->x + (xsize>>1);
-                s16 offsety = sprite->y + (ysize>>1);
-                                vdpSprite->y = offsety + frameSprite->offsetY;
-                                vdpSprite->x = offsetx + frameSprite->offsetX;                                
-                                vdpSprite->size = frameSprite->attribute&0xff;
-                                vdpSprite->link = vdpSpriteInd++;
-                                vdpSprite->attribut = (tileoffset + frameSprite->TileOffset) | hvattr | ppattr;
-                                vdpSprite++;
-                                frameSprite++;
-                            }
-                            break;
+                    s16 xsize = (((frameSprite->attribute>>2)&0x0003)+1)<<3;
+                    s16 ysize = (((frameSprite->attribute>>0)&0x0003)+1)<<3;
+                    s16 calcx = frameSprite->offsetX;
+                    s16 calcy = frameSprite->offsetY;
+
+
+                    if((hvattr&TILE_ATTR_HFLIP_MASK) == TILE_ATTR_HFLIP_MASK){
+                        calcx = -(xsize + frameSprite->offsetX);
                     }
+                    if((hvattr&TILE_ATTR_VFLIP_MASK) == TILE_ATTR_VFLIP_MASK){
+                        calcy = -(ysize + frameSprite->offsetY);
+                    }
+
+                    vdpSprite->x = sprite->x + calcx;
+                    vdpSprite->y = sprite->y + calcy;
+                    vdpSprite->size = frameSprite->attribute&0xff;
+                    vdpSprite->link = vdpSpriteInd++;
+                    vdpSprite->attribut = (tileoffset + frameSprite->TileOffset) | hvattr | ppattr;
+                    vdpSprite++;
+                    frameSprite++;
                     nums--;
                 }
 
