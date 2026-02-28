@@ -1,4 +1,4 @@
-ResComp 3.83 (March 2024)
+ResComp 3.98 (May 2025)
 Copyright Stephane Dallongeville
 https://github.com/Stephane-D/SGDK
 
@@ -27,6 +27,7 @@ Supported resource type
 - TILESET   tileset type resource, contains tiles data which can be used / shared for TILEMAP and MAP resources.
 - TILEMAP   tilemap type resource, contains raw tilemap data. It can be used to draw an image or complete (but small) plane background.
 - MAP       map type resource, optimized to draw large map / level.
+- OBJECTS   objects type resource, contains an array of custom Tiled map Objects, can be used to define almost anything you want to attach to a specific MAP.
 - IMAGE     image type resource, internally contains Palette, Tileset and Tilemap data. It can be used to draw an image or complete (but small)
             plane background.
 - SPRITE    sprite type resource, used to handle sprites with the SGDK Sprite engine.
@@ -111,7 +112,7 @@ If you use a real 'tileset format' image as input (as a font) then you should se
 to avoid removing duplicated tiles (which may exist).
 
 Syntax:
-TILESET name file [compression [opt]]
+TILESET name file [compression [opt [ordering [export]]]]
 
     name            name of the output TileSet structure
     file            path of the input file (BMP, PNG image file or TSX Tiled file)
@@ -125,6 +126,12 @@ TILESET name file [compression [opt]]
                         0 / NONE        = no optimisation, each tile is unique
                         1 / ALL         = ignore duplicated and flipped tile (default)
                         2 / DUPLICATE   = ignore duplicated tile only
+    ordering        define the tile process order, accepted values:
+                        ROW             = process per row (default)
+                        COLUMN          = process per column
+    export          enable the tileset PNG export, accept values:
+                        0 / FALSE       = no PNG export (default)
+                        1 / TRUE        = optimized tileset is export to PNG format '<file>-tileset-export.png'
                         
 Tips:
 When using a 8bpp indexed image as input you can use the extra bits of palette to provide extra information for the TILEMAP data but you have to
@@ -141,7 +148,7 @@ TileMap is used to draw in background plane, it requires a tileset which can be 
 TILEMAP resource isn't meant to be used to store large background level (eat too much space), use MAP resource for that.
 
 Syntax (image file input):
-TILEMAP name img_file tileset_id [compression [map_opt [map_base]]]
+TILEMAP name img_file tileset_id [compression [map_opt [map_base [ordering]]]]
 
     name            name of the output TileMap structure
     img_file        path of the input image file (BMP or PNG image file)
@@ -157,7 +164,10 @@ TILEMAP name img_file tileset_id [compression [map_opt [map_base]]]
                         1 / ALL         = find duplicated and flipped tile (default)
                         2 / DUPLICATE   = find duplicated tile only
     map_base        define the base tilemap value, useful to set a default priority, palette and base tile index offset.
-                        Using a base tile index offset (static tile allocation) allow to use the faster VDP_setTileMapxxx(..) functions.
+                        using a base tile index offset (static tile allocation) allow to use the faster VDP_setTileMapxxx(..) functions.
+    ordering        define the tilemap process order, accepted values:
+                        ROW             = process per row (default)
+                        COLUMN          = process per column
                                 
 Syntax (TMX tiled file input):
 TILEMAP name tmx_file layer_id [ts_compression [map_compression [map_base]]]
@@ -172,7 +182,10 @@ TILEMAP name tmx_file layer_id [ts_compression [map_compression [map_base]]]
                             2 / FAST / LZ4W = custom lz4 compression (average compression ratio but fast)
     map_compression     compression type for map (same accepted values than 'ts_compression')
     map_base            define the base tilemap value, useful to set a default priority, palette and base tile index offset.
-                            Using a base tile index offset (static tile allocation) allow to use the faster VDP_setTileMapxxx(..) functions.
+                            using a base tile index offset (static tile allocation) allow to use the faster VDP_setTileMapxxx(..) functions.
+    ordering            define the tilemap process order, accepted values:
+                            ROW             = process per row (default)
+                            COLUMN          = process per column
 
 Tips:
 When using a 8bpp indexed image as input you can use the extra bits of palette to provide extra information for the TILEMAP data but you have to
@@ -207,9 +220,9 @@ MAP name img_file tileset_id [compression [map_base]]
                         1 / APLIB       = aplib library (good compression ratio but slow)
                         2 / FAST / LZ4W = custom lz4 compression (average compression ratio but fast)
     map_base        define the base tilemap value, useful to set a default priority, palette and base tile index offset.
-                        Using a base tile index offset (static tile allocation) allow to use faster MAP decoding function internally.
+                        using a base tile index offset (static tile allocation) allow to use faster MAP decoding function internally.
                                 
-MAP name tmx_file layer_id [ts_compression [map_compression [map_base]]]
+MAP name tmx_file layer_id [ts_compression [map_compression [map_base [ordering]]]]
 
     name                name of the output Map structure
     tmx_file            path of the input TMX file (TMX Tiled file with CSV encoded map data)
@@ -221,7 +234,10 @@ MAP name tmx_file layer_id [ts_compression [map_compression [map_base]]]
                             2 / FAST / LZ4W = custom lz4 compression (average compression ratio but fast)
     map_compression     compression type for map (same accepted values than 'ts_compression')
     map_base            define the base tilemap value, useful to set a default priority, palette and base tile index offset.
-                            Using a base tile index offset (static tile allocation) allow to use faster MAP decoding function internally.
+                            using a base tile index offset (static tile allocation) allow to use faster MAP decoding function internally.
+    ordering            define the map process order, accepted values:
+                            ROW             = process per row (default)
+                            COLUMN          = process per column
 
 Tips:
 When using a 8bpp indexed image as input you can use the extra bits of palette to provide extra information for the TILEMAP data but you have to
@@ -232,9 +248,9 @@ ensure that all pixels from a same tile (block of 8x8 pixels) use the same value
 When using a TMX Tiled file you can define the priority information in different ways:
 - use 2 layers where the low priority layer's name is suffixed by ' low' and high prority layer is suffixed by ' high'
 - use 2 layers with the main layer define the map itself and a second layer suffixed by ' priority' containing the priority information (0/1)
-Note that it's always possible to set priority on a 8x8 tile basis using the second method by using the tileset information:
-- full transparent 8x8 tile is considered as LOW priority
-- 8x8 tile containing at least 1 non transparent pixel is considered as HIGH priority
+  Note that it's possible to set priority on a 8x8 tile basis using the second method by using the tileset information:
+  - full transparent 8x8 tile is considered as LOW priority  
+  - 8x8 tile containing at least 1 non transparent pixel is considered as HIGH priority
 
 
 OBJECTS
@@ -259,18 +275,23 @@ As you can see, you can also use your own enumerations in which case you need to
 sure they perfectly match your C enums (be careful about the allocated type size for your enum, default is u32 with GCC).
 
 The Tiled objects has some default attributes that you can use:
-- 'id' is used internally by rescomp and Tiled and not exported as field, but you can define your own custom 'id' field if you want.
+- 'id' define the unique object identifier can be exported in any number format.
+  To enable export of that field you need to add a custom boolean 'exportId' field and set its value to 'true'.
 - 'type' is only used as type filter (see the optional 'type_filter' parameter below) and not exported as field but you can define
   your own custom 'type' field (as an integer) if needed.
 - 'name' can be exported in string format.
   To enable export of that field you need to add a custom boolean 'exportName' field and set its value to 'true'.
+- 'visible' can be exported in boolean format.
+  To enable export of that field you need to add a custom boolean 'exportVisible' field and set its value to 'true'.  
 - 'x' and 'y' define the object position on the map and can be exported in any number format.
   To enable export of these fields, you need to add a custom boolean 'exportPosition' field and set its value to 'true'.
 - 'width' and 'height' (only for shape objects) define the shape dimensionand can be exported in any number format.
   To enable export of these fields, you need to add a custom boolean 'exportSize' field and set its value to 'true'.
-  
+- 'text' (only for text objects) define the text content can be exported in string format.
+  To enable export of these fields, you need to add a custom boolean 'exportText' field and set its value to 'true'.
+    
 Syntax:
-OBJECTS name tmx_file layer_id field_defs [decl_type [type_filter]]
+OBJECTS name tmx_file layer_id field_defs [sortby:<field>] [decl_type [type_filter]]
 
     name                name of the output array Objects structure
     tmx_file            path of the input TMX file (TMX Tiled file)
@@ -281,12 +302,13 @@ OBJECTS name tmx_file layer_id field_defs [decl_type [type_filter]]
                                 "type:u16;name:string;x:f32;y:f32;tileindex:u32"
                                 "type:u16;power:s8;visible:bool"
                             Note that not found fields are just ignored so you can extract different object types at same time easily.
+    sortby              field name to sort objects by. e.g. "sortby:x" to sort objects by x position.
     decl_type           declaration type for objects (default is "void").
                             By default object array is untyped (void) but you can specify your own type if you want ("Object", "Entity", ...)
     type_filter         define a type filter if we only want to extract Tiled objects of a specific type (see above).
 
 Tips:
-- Objects are sorted (ascending order) using the values of these fields (in this order): 'index', 'ind', 'tileIndex', 'id' .
+- When 'sortby' is not used, objects are sorted (ascending order) using the values of these fields (in this order): 'index', 'ind', 'tileIndex', 'id'.
 - You can export the tile index value corresponding to x + (y * map_width)) in 'tileIndex' field by adding a custom boolean 'exportTileIndex'
   field with value set to 'true'. When you enable the 'tileIndex' export then objects are sorted (ascending order) using the field value
   allowing fast tile index based searchs (be careful: 'index' or 'ind' fields has priority for sorting if they exist).
@@ -335,15 +357,19 @@ SPRITE name img_file width height [compression [time [collision [opt_type [opt_l
     name            name of the output SpriteDefinition structure
     img_file        path of the input image file (BMP or PNG image)
                         See the note about image format at the beginning of the file
-    width           width of a single sprite frame in tile (should be < 32)
-    height          height of a single sprite frame in tile (should be < 32)
+    width           width of a single sprite frame in tile (should be < 32), or in pixels (should be a multiple of 8 with 'p' postfix, like 32p or 32P), or number of frames in width (with 'f' postfix, like 4f or 4F)    
+    height          height of a single sprite frame in tile (should be < 32), or in pixels (should be a multiple of 8 with 'p' postfix, like 16p or 16P), or number of frames in height (with 'f' postfix, like 1f or 1F)
     compression     compression type, accepted values:
                        -1 / BEST / AUTO = use best compression
                         0 / NONE        = no compression (default)
                         1 / APLIB       = aplib library (good compression ratio but slow, don't use it for streamed sprite)
                         2 / FAST / LZ4W = custom lz4 compression (average compression ratio but fast, recommended for streamed sprite)
     time            display frame time in 1/60 of second (time between each animation frame)
-                       If this value is set to 0 (default) then auto animation is disabled
+                        If this value is set to 0 (default) then auto animation is disabled.
+                        It can be either set globally (single value) or independently for each frame of each animation.
+                        Example for 3 anim x 5 frame sprite sheet:
+                        [[3,3,3,4,4][4,5,5][2,3,3,4]]
+                        No space allowed ! And you can have empty value for empty frame.
     collision       collision type: CIRCLE, BOX or NONE (NONE by default)
     opt_type        sprite cutting optimization strategy, accepted values:
                         0 / BALANCED  = balance between used tiles and hardware sprites (default)

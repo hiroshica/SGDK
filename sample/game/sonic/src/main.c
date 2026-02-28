@@ -85,7 +85,7 @@ int main(bool hard)
             // update player first
             PLAYER_update();
             // then set camera from player position
-            CAMERA_centerOn(fix32ToInt(posX), fix32ToInt(posY));
+            CAMERA_centerOn(F32_toInt(posX), F32_toInt(posY));
 
             // then we can update entities
             ENTITIES_update();
@@ -134,14 +134,17 @@ static void joyEvent(u16 joy, u16 changed, u16 state)
     {
         paused = !paused;
         HUD_setVisibility(paused);
+
+        asm("illegal");
     }
 
     // can't do more in paused state
     if (paused) return;
 
-    // handle player / camera joy actions
+    // handle player / camera / level joy actions
     PLAYER_doJoyAction(joy, changed, state);
     CAMERA_doJoyAction(joy, changed, state);
+    LEVEL_doJoyAction(joy, changed, state);
 }
 
 static void vblank()

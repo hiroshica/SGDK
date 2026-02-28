@@ -30,7 +30,7 @@
 #if (ENABLE_LOGO != 0)
 #define LOGO_SIZE                   64
 
-#include "libres.h"
+#include "res/libres.h"
 #endif
 
 
@@ -58,10 +58,8 @@ extern u16 lastVCnt;
 
 // extern library callback function (we don't want to share them)
 extern void BMP_doVBlankProcess(void);
-extern void XGM_doVBlankProcess(void);
 extern bool MAP_doVBlankProcess(void);
 extern bool VDP_doVBlankScrollProcess(void);
-extern bool XGM2_doVBlankFadeProcess(void);
 
 
 // we don't want to share that method
@@ -75,7 +73,8 @@ static void internal_reset();
 // this one can't be static (used by vdp.c)
 bool addFrameLoad(u16 frameLoad, u32 vtime);
 
-// exception callbacks
+#if LEGACY_ERROR_HANDLER
+// exception callbacks (legacy error handler)
 __attribute__((externally_visible)) VoidCallback *busErrorCB;
 __attribute__((externally_visible)) VoidCallback *addressErrorCB;
 __attribute__((externally_visible)) VoidCallback *illegalInstCB;
@@ -86,25 +85,26 @@ __attribute__((externally_visible)) VoidCallback *privilegeViolationCB;
 __attribute__((externally_visible)) VoidCallback *traceCB;
 __attribute__((externally_visible)) VoidCallback *line1x1xCB;
 __attribute__((externally_visible)) VoidCallback *errorExceptionCB;
-__attribute__((externally_visible)) VoidCallback *intCB;
 
-// user V-Int, H-Int and Ext-Int callbacks
-__attribute__((externally_visible)) VoidCallback *vintCB;
-__attribute__((externally_visible)) InterruptCaller hintCaller;
-__attribute__((externally_visible)) VoidCallback *eintCB;
-
-// user VBlank callbacks
-VoidCallback *vblankCB;
-
-// exception state consumes 78 bytes of memory
+// exception state consumes 78 bytes of memory (legacy error handler)
 __attribute__((externally_visible)) u32 registerState[8+8];
 __attribute__((externally_visible)) u32 pcState;
 __attribute__((externally_visible)) u32 addrState;
 __attribute__((externally_visible)) u16 ext1State;
 __attribute__((externally_visible)) u16 ext2State;
 __attribute__((externally_visible)) u16 srState;
+#endif
 
-__attribute__((externally_visible)) vu16 VBlankProcess;
+// user V-Int, H-Int, Ext-Int and Int callbacks
+__attribute__((externally_visible)) VoidCallback *vintCB;
+__attribute__((externally_visible)) InterruptCaller hintCaller;
+__attribute__((externally_visible)) VoidCallback *eintCB;
+__attribute__((externally_visible)) VoidCallback *intCB;
+
+// user VBlank callbacks
+VoidCallback *vblankCB;
+
+__attribute__((externally_visible)) u16 VBlankProcess;
 __attribute__((externally_visible)) vu16 intTrace;
 
 // need to be accessed from external
@@ -119,6 +119,7 @@ static u16 cpuFrameLoad;
 static u32 frameCnt;
 static u32 lastSubTick;
 
+#if LEGACY_ERROR_HANDLER
 
 static void addValueU8(char *dst, char *str, u8 value)
 {
@@ -299,7 +300,7 @@ static NO_INLINE u16 showBusAddressErrorDump(u16 pos)
 
 
 // bus error default callback
-void NO_INLINE _buserror_callback()
+NO_INLINE void _buserror_callback()
 {
     SYS_setInterruptMaskLevel(7);
     VDP_init();
@@ -311,7 +312,7 @@ void NO_INLINE _buserror_callback()
 }
 
 // address error default callback
-void NO_INLINE _addresserror_callback()
+NO_INLINE void _addresserror_callback()
 {
     SYS_setInterruptMaskLevel(7);
     VDP_init();
@@ -323,7 +324,7 @@ void NO_INLINE _addresserror_callback()
 }
 
 // illegal instruction exception default callback
-void NO_INLINE _illegalinst_callback()
+NO_INLINE void _illegalinst_callback()
 {
     SYS_setInterruptMaskLevel(7);
     VDP_init();
@@ -335,7 +336,7 @@ void NO_INLINE _illegalinst_callback()
 }
 
 // division by zero exception default callback
-void NO_INLINE _zerodivide_callback()
+NO_INLINE void _zerodivide_callback()
 {
     SYS_setInterruptMaskLevel(7);
     VDP_init();
@@ -359,7 +360,7 @@ void _chkinst_callback()
 }
 
 // TRAPV instruction default callback
-void NO_INLINE _trapvinst_callback()
+NO_INLINE void _trapvinst_callback()
 {
     SYS_setInterruptMaskLevel(7);
     VDP_init();
@@ -371,7 +372,7 @@ void NO_INLINE _trapvinst_callback()
 }
 
 // privilege violation exception default callback
-void NO_INLINE _privilegeviolation_callback()
+NO_INLINE void _privilegeviolation_callback()
 {
     SYS_setInterruptMaskLevel(7);
     VDP_init();
@@ -383,19 +384,19 @@ void NO_INLINE _privilegeviolation_callback()
 }
 
 // trace default callback
-void NO_INLINE _trace_callback()
+NO_INLINE void _trace_callback()
 {
 
 }
 
 // line 1x1x exception default callback
-void NO_INLINE _line1x1x_callback()
+NO_INLINE void _line1x1x_callback()
 {
 
 }
 
 // error exception default callback
-void NO_INLINE _errorexception_callback()
+NO_INLINE void _errorexception_callback()
 {
     SYS_setInterruptMaskLevel(7);
     VDP_init();
@@ -405,40 +406,28 @@ void NO_INLINE _errorexception_callback()
 
     while(1);
 }
+#endif /* LEGACY_ERROR_HANDLER */
 
 // level interrupt default callback
-void NO_INLINE _int_callback()
+static void _int_callback()
+{
+    //
+}
+
+// Empty Callback
+static void _empty_callback()
+{
+    //
+}
+
+// Empty h-int Callback
+static HINTERRUPT_CALLBACK _empty_hint_callback()
 {
     //
 }
 
 
-// Dummy V-Blank Callback
-void NO_INLINE _vblank_dummy_callback()
-{
-    //
-}
-
-// Dummy V-Int Callback
-void NO_INLINE _vint_dummy_callback()
-{
-    //
-}
-
-// Dummy H-Int Callback
-HINTERRUPT_CALLBACK _hint_dummy_callback()
-{
-    //
-}
-
-// Dummy Ext-Int Callback
-void NO_INLINE _extint_dummy_callback()
-{
-    //
-}
-
-
-void NO_INLINE _start_entry()
+NO_INLINE void _start_entry()
 {
     u32 banklimit;
     u16* src;
@@ -477,6 +466,7 @@ void NO_INLINE _start_entry()
     // reset vtimer
     vtimer = 0;
 
+#if LEGACY_ERROR_HANDLER
     // default interrupt callback
     busErrorCB = _buserror_callback;
     addressErrorCB = _addresserror_callback;
@@ -488,6 +478,8 @@ void NO_INLINE _start_entry()
     traceCB = _trace_callback;
     line1x1xCB = _line1x1x_callback;
     errorExceptionCB = _errorexception_callback;
+#endif
+
     intCB = _int_callback;
 
     internal_reset();
@@ -529,10 +521,12 @@ void NO_INLINE _start_entry()
                     BMP_drawBitmapScaled(logo, 128 - (w >> 1), 80 - (w >> 1), w, w, FALSE);
                     // flip to screen
                     BMP_flip(FALSE);
+                    // so palette fade is done
+                    DMA_flushQueue();
                 }
 
                 // while fade not completed
-                while(PAL_doFadeStep());
+                PAL_waitFadeCompletion();
             }
 
             // wait 1 second
@@ -575,7 +569,7 @@ void NO_INLINE _start_entry()
     while(TRUE) SYS_doVBlankProcess();
 }
 
-void NO_INLINE _reset_entry()
+NO_INLINE void _reset_entry()
 {
     internal_reset();
 
@@ -585,7 +579,7 @@ void NO_INLINE _reset_entry()
     while(TRUE) SYS_doVBlankProcess();
 }
 
-static void NO_INLINE internal_reset()
+static NO_INLINE void internal_reset()
 {
     // disable SRAM just in case (if it was enabled on reset)
     SRAM_disable();
@@ -595,12 +589,12 @@ static void NO_INLINE internal_reset()
     SYS_resetBanks();
 #endif
 
-    vblankCB = _vblank_dummy_callback;
-    vintCB = _vint_dummy_callback;
+    vblankCB = _empty_callback;
+    vintCB = _empty_callback;
     // fast hint call (auto modified JMP instruction)
     hintCaller.jmpInst = 0x4EF9;                // JMP (xxx).L
-    hintCaller.addr = _hint_dummy_callback;
-    eintCB = _extint_dummy_callback;
+    hintCaller.addr = _empty_hint_callback;
+    eintCB = _empty_callback;
     VBlankProcess = 0;
     intTrace = 0;
     intLevelSave = 0;
@@ -639,7 +633,6 @@ static void NO_INLINE internal_reset()
     // reseting z80 also reset the ym2612
     Z80_init();
 
-
     // enable interrupts
     SYS_setInterruptMaskLevel(3);
 }
@@ -649,7 +642,7 @@ bool SYS_doVBlankProcess()
     return SYS_doVBlankProcessEx(ON_VBLANK_START);
 }
 
-bool NO_INLINE SYS_doVBlankProcessEx(VBlankProcessTime processTime)
+NO_INLINE bool SYS_doVBlankProcessEx(VBlankProcessTime processTime)
 {
     if (processTime != IMMEDIATELY)
     {
@@ -733,12 +726,6 @@ bool NO_INLINE SYS_doVBlankProcessEx(VBlankProcessTime processTime)
                 KLog_U2("Warning: Palette fade task completed outside VBlank area. Scanline after completion = ", vcnt, " on frame #", vtimer);
         }
 #endif
-    }
-
-    // XGM2 fade process
-    if (vbp & PROCESS_XGM2_FADE_TASK)
-    {
-        if (!XGM2_doVBlankFadeProcess()) vbp &= ~PROCESS_XGM2_FADE_TASK;
     }
 
     // store back
@@ -849,25 +836,25 @@ void SYS_enableInts()
 void SYS_setVBlankCallback(VoidCallback *CB)
 {
     if (CB) vblankCB = CB;
-    else vblankCB = _vblank_dummy_callback;
+    else vblankCB = _empty_callback;
 }
 
 void SYS_setVIntCallback(VoidCallback *CB)
 {
     if (CB) vintCB = CB;
-    else vintCB = _vint_dummy_callback;
+    else vintCB = _empty_callback;
 }
 
 void SYS_setHIntCallback(VoidCallback *CB)
 {
     if (CB) hintCaller.addr = CB;
-    else hintCaller.addr = _hint_dummy_callback;
+    else hintCaller.addr = _empty_hint_callback;
 }
 
 void SYS_setExtIntCallback(VoidCallback *CB)
 {
     if (CB) eintCB = CB;
-    else eintCB = _extint_dummy_callback;
+    else eintCB = _empty_callback;
 }
 
 
@@ -1001,7 +988,7 @@ u16 SYS_getCPULoad()
 }
 
 
-u16 NO_INLINE SYS_computeChecksum()
+NO_INLINE u16 SYS_computeChecksum()
 {
     u32 adr;
     u32 chk;
@@ -1040,13 +1027,27 @@ bool SYS_isChecksumOk()
 }
 
 
-void SYS_die(char *err)
+void SYS_die(char *err, ...)
 {
     SYS_setInterruptMaskLevel(7);
     VDP_init();
-    VDP_drawText("A fatal error occured !", 2, 2);
-    VDP_drawText("cannot continue...", 4, 3);
-    if (err) VDP_drawText(err, 0, 5);
+    VDP_setBackgroundColor(63);
+    VDP_drawText("A fatal error occured!", 9, 2);
+    VDP_drawText("cannot continue...", 11, 3);
+
+    u8 y = 5;
+
+    va_list argptr;
+    va_start(argptr, err);
+
+    const char* str = err;
+    while (str != NULL)
+    {
+        VDP_drawText(str, 1, y);
+        str = va_arg(argptr, const char*);
+        y++;
+    }
+    va_end(argptr);
 
     while(1);
 }

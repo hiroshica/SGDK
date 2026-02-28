@@ -31,10 +31,10 @@ Previous MegaWiFi releases also included two more modules: `mpool` (a quite limi
 
 This module implements basic multitasking capabilities. It allows setting up a task that runs in user mode, in addition to the supervisor task. For the user task to run, the supervisor task must give it some CPU time. This can be done in two ways:
 
-* By calling the lock function `tsk_super_pend()`: this causes the user task to resume execution. User task will keep running until it calls `tsk_super_post()`, or the timeout specified in the `tsk_supper_pend()` occurs. Then supervisor task will resume execution.
-* By calling `tsk_user_yield()`: this causes the user task to resume execution. User task will keep running until the next VBLANK interrupt, or until `tsk_super_post()` is called with the `force_ctx_sw` param set to `true`.
+* By calling the lock function `TSK_superPend()`: this causes the user task to resume execution. User task will keep running until it calls `TSK_superPost()`, or the timeout specified in the `tsk_supper_pend()` occurs. Then supervisor task will resume execution.
+* By calling `TSK_userYield()`: this causes the user task to resume execution. User task will keep running until the next VBLANK interrupt, or until `TSK_superPost()` is called with the `force_ctx_sw` param set to `true`.
 
-User task will not run unless the supervisor task calls either `tsk_super_pend()` or `tsk_user_yield()`. So you must make sure to call one of them in your main loop or the user task will starve. If you are using SGDK, the `tsk_user_yield()` call is done transparently inside `VDP_waitVSync()`, `VDP_waitVActive()` and `SYS_doVBlankProcess()`. So just make sure you are calling one of these in your loop and you should be ready to go!
+User task will not run unless the supervisor task calls either `TSK_superPend()` or `TSK_userYield()`. So you must make sure to call one of them in your main loop or the user task will starve. If you are using SGDK, the `TSK_userYield()` call is done transparently inside `VDP_waitVSync()`, `VDP_waitVActive()` and `SYS_doVBlankProcess()`. So just make sure you are calling one of these in your loop and you should be ready to go!
 
 A typical Megadrive game contains a main loop with a structure similar to this:
 
@@ -57,7 +57,7 @@ void main()
 
 The game performs the initialization using `init()` function, and then enters an infinite loop that:
 
-1. Waits for the vertical blanking period to begin. Inside this function `tsk_user_yield()` must be called, either directly or indirectly (if you are using SGDK, as explained above).
+1. Waits for the vertical blanking period to begin. Inside this function `TSK_userYield()` must be called, either directly or indirectly (if you are using SGDK, as explained above).
 4. Reads controller inputs.
 2. Updates the frame (scroll, sprites, tiles, etc).
 3. Keeps the music and SFX playing.
@@ -95,7 +95,7 @@ static void user_tsk(void)
 static void task_init(void)
 {
 	// Configure the user task
-	tsk_user_set(user_tsk);
+	TSK_userSet(user_tsk);
 }
 ```
 
@@ -190,7 +190,7 @@ static void init(void)
 	// Initialize hardware and game
 	// [...]
 	// Configure user task
-	tsk_user_set(user_tsk);
+	TSK_userSet(user_tsk);
 	// Initialize MegaWiFi
 	megawifi_init();
 }
@@ -411,7 +411,7 @@ static int http_finish(char *recv_buf, unsigned int *len)
 	enum mw_err err;
 	uint32_t content_len = 0;
 
-	err = mw_http_finish(&content_len, MS_TO_FRAMES(60000));
+	err = mw_http_finish(&content_len, MW_MS_TO_FRAMES(60000));
 	err = err >= 200 && err <= 300 ? 0 : err;
 	if (content_len > b.msg_buf_len) {
 		err = -1;
@@ -626,7 +626,7 @@ To initialize the API, you have to pass the endpoint, the game and user credenti
 ```C
 	if (gj_init("https://api.gamejolt.com/api/game/v1_2/", GJ_GAME_ID,
 				GJ_PRIV_KEY, username, user_token,
-				cmd_buf, MW_BUFLEN, MS_TO_FRAMES(30000))) {
+				cmd_buf, MW_BUFLEN, MW_MS_TO_FRAMES(30000))) {
 		// Handle init error
 	}
 ```

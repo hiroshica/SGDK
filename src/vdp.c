@@ -15,7 +15,6 @@
 #include "sys.h"
 #include "task.h"
 
-#include "font.h"
 #include "sprite_eng.h"
 #include "sprite_eng_legacy.h"
 
@@ -62,7 +61,7 @@ u16 windowWidthSft;
 u16 lastVCnt;
 
 
-void NO_INLINE VDP_init()
+NO_INLINE void VDP_init()
 {
     vu16 *pw;
     u16 i;
@@ -131,7 +130,7 @@ void NO_INLINE VDP_init()
 }
 
 
-void NO_INLINE VDP_resetScreen()
+NO_INLINE void VDP_resetScreen()
 {
     u16 i;
     bool enable = VDP_isEnable();
@@ -169,7 +168,7 @@ void NO_INLINE VDP_resetScreen()
     }
 
     // load default font
-    if (!VDP_loadFont(&font_default, DMA))
+    if (!VDP_loadDefaultFont(DMA))
     {
         VDP_setEnable(TRUE);
 
@@ -415,7 +414,7 @@ u16 VDP_getPlaneHeight()
     return planeHeight;
 }
 
-void NO_INLINE VDP_setPlaneSize(u16 w, u16 h, bool setupVram)
+NO_INLINE void VDP_setPlaneSize(u16 w, u16 h, bool setupVram)
 {
     vu16 *pw;
     u16 v = 0;
@@ -808,6 +807,36 @@ void VDP_setWindowVPos(u16 down, u16 pos)
     *pw = 0x9200 | v;
 }
 
+void VDP_setWindowOff() 
+{
+    VDP_setWindowVPos(false, 0);
+    VDP_setWindowHPos(false, 0);
+}
+
+void VDP_setWindowOnTop(u16 rows) 
+{
+    VDP_setWindowVPos(false, rows);
+}
+
+void VDP_setWindowOnBottom(u16 rows) 
+{
+    VDP_setWindowVPos(true, (screenHeight / 8) - rows);
+}
+
+void VDP_setWindowOnLeft(u16 cols) 
+{
+    VDP_setWindowHPos(false, cols);
+}
+
+void VDP_setWindowOnRight(u16 cols) 
+{
+    VDP_setWindowHPos(true, (screenWidth / 16) - cols);
+}
+
+void VDP_setWindowFullScreen()
+{
+    VDP_setWindowVPos(false, screenHeight / 8);
+}
 
 void VDP_waitDMACompletion()
 {
@@ -820,7 +849,7 @@ void VDP_waitFIFOEmpty()
 }
 
 
-bool NO_INLINE VDP_waitVInt()
+NO_INLINE bool VDP_waitVInt()
 {
     // in VInt --> return
     if (SYS_isInVInt()) return FALSE;
@@ -854,7 +883,7 @@ bool NO_INLINE VDP_waitVInt()
 }
 
 
-bool NO_INLINE VDP_waitVBlank(bool forceNext)
+NO_INLINE bool VDP_waitVBlank(bool forceNext)
 {
     vu16 *pw = (u16 *) VDP_CTRL_PORT;
 
@@ -963,35 +992,33 @@ u16 VDP_getAdjustedVCounter()
 }
 
 
-void VDP_showFPS(u16 asFloat)
+void VDP_showFPS(u16 asFloat, u16 x, u16 y)
 {
     char str[16];
 
     if (asFloat)
     {
         fix32ToStr(SYS_getFPSAsFloat(), str, 1);
-        VDP_clearText(2, 1, 5);
+        // display FPS
+        VDP_drawTextFill(str, x, y, 4);
     }
     else
     {
         uintToStr(SYS_getFPS(), str, 1);
-        VDP_clearText(2, 1, 2);
+        // display FPS
+        VDP_drawTextFill(str, x, y, 2);
     }
-
-    // display FPS
-    VDP_drawText(str, 1, 1);
 }
 
-void VDP_showCPULoad()
+void VDP_showCPULoad(u16 x, u16 y)
 {
     char str[16];
 
     uintToStr(SYS_getCPULoad(), str, 1);
     strcat(str, "%");
 
-    VDP_clearText(2, 2, 4);
-    // display FPS
-    VDP_drawText(str, 1, 2);
+    // display CPU load
+    VDP_drawTextFill(str, x, y, 4);
 }
 
 
@@ -1021,7 +1048,7 @@ static void updateMapsAddress(bool initializing)
         if (!initializing)
         {
             // reload default font as its VRAM address has changed
-            VDP_loadFont(&font_default, CPU);
+            VDP_loadDefaultFont(CPU);
             // re-pack memory as VDP_lontFont allocate memory to unpack font
             MEM_pack();
         }

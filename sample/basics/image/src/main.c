@@ -1,7 +1,6 @@
 #include <genesis.h>
 
 #include "gfx.h"
-#include "dma.h"
 
 int main(bool hard)
 {
@@ -41,7 +40,7 @@ int main(bool hard)
 
     while(TRUE)
     {
-        VDP_waitVInt();
+        SYS_doVBlankProcess();
     }
 
     return 0;

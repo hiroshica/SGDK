@@ -11,7 +11,9 @@ import sgdk.rescomp.type.Basics.Compression;
 import sgdk.rescomp.type.SpriteCell.OptimizationLevel;
 import sgdk.rescomp.type.SpriteCell.OptimizationType;
 import sgdk.tool.FileUtil;
+import sgdk.tool.ImageUtil;
 import sgdk.tool.StringUtil;
+import sgdk.tool.ImageUtil.BasicImageInfo;
 
 public class SpriteProcessor implements Processor
 {
@@ -30,14 +32,19 @@ public class SpriteProcessor implements Processor
             System.out.println("SPRITE name \"file\" width height [compression [time [collision [opt_type [opt_level [opt_duplicate]]]]]]");
             System.out.println("  name          Sprite variable name");
             System.out.println("  file          the image file to convert to SpriteDefinition structure (BMP or PNG image)");
-            System.out.println("  width         width of a single sprite frame in tile");
-            System.out.println("  height        height of a single sprite frame in tile");
+            System.out.println("  width         width of a single sprite frame in tile (should be < 32), or in pixels (should be a multiple of 8 with 'p' postfix, like 32p or 32P), or number of frames in width (with 'f' postfix, like 4f or 4F)");    
+            System.out.println("  height        height of a single sprite frame in tile (should be < 32), or in pixels (should be a multiple of 8 with 'p' postfix, like 16p or 16P), or number of frames in height (with 'f' postfix, like 1f or 1F)");
             System.out.println("  compression   compression type, accepted values:");
             System.out.println("                   -1 / BEST / AUTO = use best compression");
             System.out.println("                    0 / NONE        = no compression (default)");
             System.out.println("                    1 / APLIB       = aplib library (good compression ratio but slow)");
             System.out.println("                    2 / FAST / LZ4W = custom lz4 compression (average compression ratio but fast)");
             System.out.println("  time          display frame time in 1/60 of second (time between each animation frame)");
+            System.out.println("                    If this value is set to 0 (default) then auto animation is disabled");
+            System.out.println("                    It can be set globally (single value) or independently for each frame of each animation");
+            System.out.println("                    Example for a sprite sheet of 3 animations x 5 frames:");
+            System.out.println("                    [[3,3,3,4,4][4,5,5][2,3,3,4]]");
+            System.out.println("                    As you can see you can have empty value for empty frame");
             System.out.println("  collision     collision type: CIRCLE, BOX or NONE (BOX by default)");
             System.out.println("  opt_type      sprite cutting optimization strategy, accepted values:");
             System.out.println("                    0 / BALANCED  = balance between used tiles and hardware sprites (default)");
@@ -62,11 +69,88 @@ public class SpriteProcessor implements Processor
         final String id = fields[1];
         // get input file
         final String fileIn = FileUtil.adjustPath(Compiler.resDir, fields[2]);
-        // get frame size (in tile)
-        final int wf = StringUtil.parseInt(fields[3], 0);
-        final int hf = StringUtil.parseInt(fields[4], 0);
+        
+        
+        final String wArg = fields[3];
+        final String hArg = fields[4];
+        
+        final int wf;
+        final int hf;
+        
+        // get sprite image info
+        final BasicImageInfo imgInfo = ImageUtil.getBasicInfo(fileIn);
+        
+        // try to get frame width (in tile) from 'P' tagged argument (width in pixels)   
+        // if fail, try to get frame width (in tile) from 'F' tagged argument (width frames)  
+        // if fail, try to get frame width (in tile) by classic method (width in tile)
+        if (StringUtil.isTaggedNumber(wArg.toUpperCase(), "P"))
+        {
+        	// get frame width in pixels by parsing integer from tagged number ("125p" or "125P" like)
+        	final int wfPix = StringUtil.parseTaggedInt(wArg.toUpperCase(), "P", 0);  
+        	
+            // check sprite width argument is correct
+            if ((wfPix % 8) != 0)
+                throw new IllegalArgumentException("Error: the Sprite '" + id + "' width parameter (" + wfPix + " pixels), is not a multiple of 8");
 
-        if ((wf < 1) || (hf < 1))
+        	// calculate tiles from pixels
+        	wf = wfPix / 8;
+
+        }
+        else if (StringUtil.isTaggedNumber(wArg.toUpperCase(), "F"))
+        {
+        	// get frame number in pixels by parsing integer from tagged number ("125p" or "125P" like)
+        	final int fc = StringUtil.parseTaggedInt(wArg.toUpperCase(), "F", 0);          	
+            final int w = imgInfo.w;
+            
+            // check sprite width argument is correct
+            if ((w % fc) != 0)
+                throw new IllegalArgumentException("Error: '" + fileIn + "' width (" + w + ") is not a multiple of frame count (" + fc + ")");
+            
+        	// calculate frame width in tiles
+            wf = w / fc / 8;            
+        }        
+        else
+        {
+        	// get frame width (in tile)  
+        	wf = StringUtil.parseInt(wArg, 0);   
+        }
+       
+        // try to get frame height (in tile) from 'P' tagged argument (height in pixels)   
+        // if fail, try to get frame height (in tile) from 'F' tagged argument (height frames)  
+        // if fail, try to get frame height (in tile) by classic method (height in tile)
+        if (StringUtil.isTaggedNumber(hArg.toUpperCase(), "P"))
+        {
+        	// get frame height in pixels by parsing integer from tagged number ("125p" or "125P" like)
+        	final int hfPix = StringUtil.parseTaggedInt(hArg.toUpperCase(), "P", 0);
+        	
+            // check sprite height argument is correct
+            if ((hfPix % 8) != 0)
+                throw new IllegalArgumentException("Error: the Sprite '" + id + "' height parameter (" + hfPix + " pixels), is not a multiple of 8");
+            
+        	// calculate tiles from pixels
+            hf = hfPix / 8;
+        }
+        else if (StringUtil.isTaggedNumber(hArg.toUpperCase(), "F"))
+        {
+        	// get frame number in pixels by parsing integer from tagged number ("125p" or "125P" like)
+        	final int fc = StringUtil.parseTaggedInt(hArg.toUpperCase(), "F", 0);          	
+            final int h = imgInfo.h;
+            
+            // check sprite width argument is correct
+            if ((h % fc) != 0)
+                throw new IllegalArgumentException("Error: '" + fileIn + "' height (" + h + ") is not a multiple of frame count (" + fc + ")");
+            
+        	// calculate frame height in tiles
+            hf = h / fc / 8;
+        }                
+        else
+        {
+        	// get frame height (in tile)  
+        	hf = StringUtil.parseInt(hArg, 0);   
+        }
+        
+        // frame size must be at least 1
+		if ((wf < 1) || (hf < 1))
         {
             System.out.println("Wrong SPRITE definition");
             System.out.println("SPRITE name \"file\" width height [compression [time [collision [opt_type [opt_level]]]]]");
@@ -90,9 +174,9 @@ public class SpriteProcessor implements Processor
         if (fields.length >= 6)
             compression = Util.getCompression(fields[5]);
         // get frame time
-        int time = 0;
+        int[][] time = new int[][] {{ 0 }};
         if (fields.length >= 7)
-            time = StringUtil.parseInt(fields[6], 0);
+            time = StringUtil.parseIntArray2D(fields[6], new int[][] {{ 0 }});
         // get collision value
         CollisionType collision = CollisionType.NONE;
         if (fields.length >= 8)

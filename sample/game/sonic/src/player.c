@@ -1,4 +1,4 @@
-#include "genesis.h"
+#include <genesis.h>
 
 #include "player.h"
 
@@ -156,7 +156,7 @@ void PLAYER_update(void)
 
 void PLAYER_updateScreenPosition(void)
 {
-    setSpritePosition(player, fix32ToInt(posX) - camPosX, fix32ToInt(posY) - camPosY);
+    setSpritePosition(player, F32_toInt(posX) - camPosX, F32_toInt(posY) - camPosY);
 }
 
 
@@ -173,12 +173,12 @@ void PLAYER_handleInput(u16 value)
 
 void PLAYER_doJoyAction(u16 joy, u16 changed, u16 state)
 {
-    if (changed & state & (BUTTON_A | BUTTON_B | BUTTON_C | BUTTON_X | BUTTON_Y | BUTTON_Z))
+    if (changed & state & (BUTTON_A | BUTTON_B | BUTTON_C))
     {
         if (movY == 0)
         {
             movY = -jumpSpeed;
-            XGM2_playPCM(sonic_jump_sfx, sizeof(sonic_jump_sfx), SOUND_PCM_CH2);
+            XGM2_playPCMEx(sonic_jump_sfx, sizeof(sonic_jump_sfx), SOUND_PCM_CH2, 15, TRUE, FALSE);
         }
     }
 }

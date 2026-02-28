@@ -1,4 +1,4 @@
-#include "genesis.h"
+#include <genesis.h>
 
 #include "level.h"
 
@@ -19,6 +19,10 @@ Map *bga;
 
 // BG start tile index
 u16 bgBaseTileIndex[2];
+
+
+// forward
+static void PatchDataCallback(Map *map, u16 *buf, u16 x, u16 y, MapUpdateType updateType, u16 size);
 
 
 u16 LEVEL_init(u16 vramIndex)
@@ -167,9 +171,45 @@ void LEVEL_updateMapAlternate(VDPPlane plane, Map* map, s16 xmt, s16 ymt)
 }
 
 
+void LEVEL_doJoyAction(u16 joy, u16 changed, u16 state)
+{
+    if (changed & state & BUTTON_X)
+    {
+        if (bga->mapDataPatchCB != NULL) MAP_setDataPatchCallback(bga, NULL);
+        else  MAP_setDataPatchCallback(bga, PatchDataCallback);
+    }
+}
+
+
 void LEVEL_onVBlank(void)
 {
     // reset tilemap buffer position after update
     bufOffset = 0;
+}
+
+
+static void PatchDataCallback(Map *map, u16 *buf, u16 x, u16 y, MapUpdateType updateType, u16 size)
+{
+    u16* dst = buf;
+    u16 xt = x;
+    u16 yt = y;
+    u16 i = size;
+
+    while(i--)
+    {
+        u16 tileData = *dst;
+
+        // remove palette info
+        tileData &= ~TILE_ATTR_PALETTE_MASK;
+        // set palette depending tile position (just for fun)
+        tileData |= ((xt ^ yt) & 3) << TILE_ATTR_PALETTE_SFT;
+
+        // set back tile data
+        *dst++ = tileData;
+
+        // just to keep track of current tile position
+        if (updateType == ROW_UPDATE) xt++;
+        else yt++;
+    }
 }
 

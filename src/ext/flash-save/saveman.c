@@ -41,7 +41,7 @@
 #define ALLOC(len) MEM_alloc(len)
 #define DEALLOC(chunk) do{MEM_free(chunk);}while(0)
 #define CRITICAL_ENTER SYS_disableInts();const bool z80_taken=Z80_getAndRequestBus(TRUE)
-#define CRITICAL_EXIT if (z80_taken) Z80_releaseBus();SYS_enableInts()
+#define CRITICAL_EXIT if (!z80_taken) Z80_releaseBus();SYS_enableInts()
 
 // Magic number at the beginning of sectors
 #define MAGIC_NUM 0x44534D21
@@ -111,26 +111,29 @@ static uint16_t save_data_off(void)
 	return align(sizeof(struct sector_hdr), 2);
 }
 
-static int16_t sector_addrs_set(uint32_t max_length_restrict)
+static int16_t sector_addrs_set(void)
 {
-	const struct flash_chip *flash = flash_metadata_get();
+	volatile const uint32_t *range = (uint32_t*)0x1B4;
 
-	if (!max_length_restrict) {
-		max_length_restrict = MIN(flash->len, 0x400000);
-	}
-	// We allocate the last two sectors
-	flash_sector_limits(max_length_restrict - 1, &sm->sect[1].addr,
-			&sm->sect[1].limit);
-	// Sector end should match restricted length
-	if (sm->sect[1].limit != max_length_restrict) {
-		return SM_STAT_PARAM_ERR;
-	}
+	const uint32_t start = range[0];
+	const uint32_t end = range[1];
+	// Verify the range indicated in the header corresponds
+	// to two adjacent sectors
+	flash_sector_limits(start, &sm->sect[0].addr, &sm->sect[0].limit);
+	flash_sector_limits(end, &sm->sect[1].addr, &sm->sect[1].limit);
 
-	uint32_t sector_len = sm->sect[1].limit - sm->sect[1].addr;
-	flash_sector_limits(sm->sect[1].addr - 1, &sm->sect[0].addr,
-			&sm->sect[0].limit);
-	// This driver requires both sectors to have the same length
-	if (sector_len != sm->sect[1].addr - sm->sect[0].addr) {
+	// Checks that start address matches first sector start address, that
+	// end address matches second sector end address, that both sectors are
+	// are adjacent (first sector limit matches second sector start) and
+	// that both sectors are the same length.
+	// TODO We could maybe relax the requirement of both sectors having to
+	// be adjacent, but this is currently not supported.
+	if (sm->sect[0].addr != start ||
+			sm->sect[0].limit != sm->sect[1].addr ||
+			sm->sect[1].limit != (end + 1) ||
+			(sm->sect[0].limit - sm->sect[0].addr) !=
+			(sm->sect[1].limit - sm->sect[1].addr)) {
+		// Specified range does not match chip sector configuration
 		return SM_STAT_PARAM_ERR;
 	}
 
@@ -139,7 +142,8 @@ static int16_t sector_addrs_set(uint32_t max_length_restrict)
 
 static int16_t sector_init(uint16_t sect_num, uint8_t num_slots)
 {
-	struct sector_hdr hdr = {
+	// Mark struct as volatile to prevent compiler reordering writes
+	volatile struct sector_hdr hdr = {
 		.magic = MAGIC_NUM,
 		.num_slots = num_slots,
 		.reserved = 0xFF
@@ -198,7 +202,7 @@ static uint16_t safe_sect_erase(uint32_t addr)
 // first position free if the zone is not erased
 static uint32_t erase_check(uint32_t start_addr, uint32_t limit_addr)
 {
-	uint16_t *pos = (uint16_t*)start_addr;
+	volatile uint16_t *pos = (uint16_t*)start_addr;
 	uint16_t *end = (uint16_t*)limit_addr;
 	uint32_t result = 0;
 
@@ -379,7 +383,7 @@ static int16_t savedata_probe(uint8_t num_slots)
 	return err;
 }
 
-int16_t sm_init(uint8_t num_slots, uint32_t max_length_restrict)
+int16_t sm_init(uint8_t num_slots)
 {
 	// We require num_slots to be between 1 and 254
 	if (0 == num_slots || 0xFF == num_slots) {
@@ -388,7 +392,7 @@ int16_t sm_init(uint8_t num_slots, uint32_t max_length_restrict)
 	if (!sm) {
 		// Don't forget to also allocate cur_blob for each slot
 		sm = ALLOC(sizeof(struct save_manager) +
-				num_slots * sizeof(uint16_t));
+				num_slots * sizeof(uint32_t));
 		if (!sm) {
 			return SM_STAT_HW_ERR;
 		}
@@ -402,7 +406,7 @@ int16_t sm_init(uint8_t num_slots, uint32_t max_length_restrict)
 		return SM_STAT_HW_ERR;
 	}
 
-	err = sector_addrs_set(max_length_restrict);
+	err = sector_addrs_set();
 	if (err) {
 		return err;
 	}
@@ -504,7 +508,7 @@ static int16_t sector_cross_begin(uint8_t slot)
 
 static int16_t blob_save(uint8_t slot, const void *save_data, uint16_t len)
 {
-	struct save_blob *blob = (struct save_blob*)sm->last_addr;
+	volatile struct save_blob *blob = (struct save_blob*)sm->last_addr;
 
 	CRITICAL_ENTER;
 	// Write data
@@ -513,7 +517,8 @@ static int16_t blob_save(uint8_t slot, const void *save_data, uint16_t len)
 
 	// Write metadata header, first length, then slot and done flag
 	if (!err) {
-		struct save_blob hdr = {
+		// Mark struct as volatile to prevent compiler reordering writes
+		volatile struct save_blob hdr = {
 			.slot = slot,
 			.flags = 0xFF,
 			.save_len = len

@@ -5,7 +5,7 @@
 
 #include "snd/sound.h"
 #include "snd/xgm2.h"
-#include "snd/xgm2/drv_xgm2.h"
+#include "src/snd/xgm2/drv_xgm2.h"
 
 #include "sys.h"
 #include "timer.h"
@@ -15,6 +15,12 @@
 #include "vdp.h"
 
 #include "tools.h"
+
+// memory functions are provided in <string.h> when using newlib
+#if (ENABLE_NEWLIB != 0)
+#include "string.h"
+#endif
+
 
 
 #define Z80_DRV_VARS                (Z80_RAM + 0x110)
@@ -161,7 +167,7 @@ const u8 psgVolTable[100] =
 
 
 // allow to access it without "public" share
-extern vu16 VBlankProcess;
+extern s16 currentDriver;
 
 // current loaded XGM track
 static const u8* currentXGM;
@@ -192,6 +198,7 @@ static u16 xgm2WaitMean;
 
 // forward
 static bool getAccess(const u8 flag);
+static void releaseAccess(const bool busTaken);
 static void initLoadCalculation(void);
 static s16 getPCMChannel(const u8 priority);
 static void setMusicTempo(const u16 value);
@@ -199,6 +206,7 @@ static void setLoopNumber(const s8 value);
 static void setFMVolume(const u16 value);
 static void setPSGVolume(const u16 value);
 static void doFade(const u16 fmVolStart, const u16 fmVolEnd, const u16 psgVolStart, const u16 psgVolEnd, const u16 frame, const FadeEndProcess fep);
+static void vintFadeProcess(void);
 
 // we don't want to share it
 extern void Z80_loadDriverInternal(const u8 *drv, const u16 size);
@@ -207,8 +215,11 @@ extern void Z80_loadDriverInternal(const u8 *drv, const u16 size);
 // XGM2 driver
 ///////////////////////////////////////////////////////////////
 
-void NO_INLINE XGM2_loadDriver(bool waitReady)
+NO_INLINE void XGM2_loadDriver(bool waitReady)
 {
+    // already loaded
+    if (currentDriver == Z80_DRIVER_XGM2) return;
+
     Z80_loadDriverInternal(drv_xgm2, sizeof(drv_xgm2));
 
     SYS_disableInts();
@@ -236,9 +247,12 @@ void NO_INLINE XGM2_loadDriver(bool waitReady)
     Z80_useBusProtection(XGM2_IN_DMA & 0xFFFF);
 
     SYS_enableInts();
+
+    // driver loaded
+    currentDriver = Z80_DRIVER_XGM2;
 }
 
-void NO_INLINE XGM2_unloadDriver(void)
+NO_INLINE void XGM2_unloadDriver(void)
 {
     // remove bus protection (signal address set to 0)
     Z80_useBusProtection(0);
@@ -248,7 +262,7 @@ void NO_INLINE XGM2_unloadDriver(void)
 bool XGM2_isPlaying(void)
 {
     // load the appropriate driver if not already done
-    Z80_loadDriver(Z80_DRIVER_XGM2, TRUE);
+    XGM2_loadDriver(TRUE);
 
     // point to Z80 status
     vu8* pb = (vu8*) Z80_DRV_STATUS;
@@ -260,19 +274,18 @@ bool XGM2_isPlaying(void)
     // play status
     bool ret = (*pb & XGM2_STATUS_PLAYING)?TRUE:FALSE;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     return ret;
 }
 
-void NO_INLINE XGM2_load(const u8 *song)
+NO_INLINE void XGM2_load(const u8 *song)
 {
     u8 ids[249*2];
     u16 i;
 
     // load the appropriate driver if not already done
-    Z80_loadDriver(Z80_DRIVER_XGM2, TRUE);
+    XGM2_loadDriver(TRUE);
 
     // set current XGM
     currentXGM = song;
@@ -281,6 +294,10 @@ void NO_INLINE XGM2_load(const u8 *song)
     u32 sampleOff = (u32) song;
     // num max sample
     u16 maxSample;
+
+    // PAL timing ?
+    if (song[1] & XGM2_PAL_FLAG) setMusicTempo(50);
+    else setMusicTempo(60);
 
     // multi tracks ?
     if (song[1] & XGM2_MULTI_TRACK_FLAG)
@@ -326,10 +343,10 @@ void XGM2_load_FAR(const u8 *song, const u32 len)
     XGM2_load(FAR_SAFE(song, len));
 }
 
-void NO_INLINE XGM2_playTrack(const u16 track)
+NO_INLINE void XGM2_playTrack(const u16 track)
 {
     // load the appropriate driver if not already done
-    Z80_loadDriver(Z80_DRIVER_XGM2, TRUE);
+    XGM2_loadDriver(TRUE);
 
 #if (LIB_LOG_LEVEL >= LOG_LEVEL_INFO)
     // trying to play no existing track ?
@@ -391,8 +408,7 @@ void NO_INLINE XGM2_playTrack(const u16 track)
     // set play XGM2 command (and clear pause/resume if any)
     *pb = (*pb & ~(XGM2_COM_RESUME_PLAY | XGM2_COM_PAUSE_PLAY)) | XGM2_COM_START_PLAY;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     // need to restore FM and PSG volumes
     if (restoreVolume)
@@ -415,10 +431,10 @@ void XGM2_play_FAR(const u8* song, const u32 len)
     XGM2_playTrack(0);
 }
 
-void NO_INLINE XGM2_stop(void)
+NO_INLINE void XGM2_stop(void)
 {
     // load the appropriate driver if not already done
-    Z80_loadDriver(Z80_DRIVER_XGM2, TRUE);
+    XGM2_loadDriver(TRUE);
 
     // request Z80 bus access
     const bool busTaken = getAccess(XGM2_ACCESS_CMD_MSK);
@@ -437,14 +453,13 @@ void NO_INLINE XGM2_stop(void)
     // set play XGM2 command (and clear pause/resume if any)
     *pb = (*pb & ~(XGM2_COM_RESUME_PLAY | XGM2_COM_PAUSE_PLAY)) | XGM2_COM_START_PLAY;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 }
 
-void NO_INLINE XGM2_pause(void)
+NO_INLINE void XGM2_pause(void)
 {
     // load the appropriate driver if not already done
-    Z80_loadDriver(Z80_DRIVER_XGM2, TRUE);
+    XGM2_loadDriver(TRUE);
 
     // request Z80 bus access
     const bool busTaken = getAccess(XGM2_ACCESS_CMD_MSK);
@@ -460,14 +475,13 @@ void NO_INLINE XGM2_pause(void)
         *pb = (*pb & ~(XGM2_COM_RESUME_PLAY | XGM2_COM_START_PLAY)) | XGM2_COM_PAUSE_PLAY;
     }
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 }
 
-void NO_INLINE XGM2_resume(void)
+NO_INLINE void XGM2_resume(void)
 {
     // load the appropriate driver if not already done
-    Z80_loadDriver(Z80_DRIVER_XGM2, TRUE);
+    XGM2_loadDriver(TRUE);
 
     // request Z80 bus access
     const bool busTaken = getAccess(XGM2_ACCESS_CMD_MSK);
@@ -491,8 +505,7 @@ void NO_INLINE XGM2_resume(void)
         }
     }
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     // need to restore FM and PSG volumes
     if (restoreVolume)
@@ -506,7 +519,7 @@ void NO_INLINE XGM2_resume(void)
 u8 XGM2_isPlayingPCM(const u16 channel_mask)
 {
     // load the appropriate driver if not already done
-    Z80_loadDriver(Z80_DRIVER_XGM2, TRUE);
+    XGM2_loadDriver(TRUE);
 
     // point to Z80 status
     vu8* pb = (vu8*) Z80_DRV_STATUS;
@@ -518,8 +531,7 @@ u8 XGM2_isPlayingPCM(const u16 channel_mask)
     // play status
     u8 ret = *pb & channel_mask;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     return ret;
 }
@@ -543,8 +555,7 @@ static s16 getPCMChannel(const u8 priority)
     pb = (vu8*) (XGM2_PCM_PRIO_EXT_INT + (XGM2_PCM_PARAM_LEN * 2));
     prios[2] = *pb & 0xF;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     // try channel 3 first if free (lower CPU usage)
     if (!(status & XGM2_STATUS_PLAYING_PCM3)) return SOUND_PCM_CH3;
@@ -557,18 +568,18 @@ static s16 getPCMChannel(const u8 priority)
     if (prios[1] <= priority) return SOUND_PCM_CH2;
 
     // try channel 1 in last (can be used for music)
-    if (!(status & XGM2_STATUS_PLAYING_PCM2)) return SOUND_PCM_CH1;
+    if (!(status & XGM2_STATUS_PLAYING_PCM1)) return SOUND_PCM_CH1;
     if (prios[0] <= priority) return SOUND_PCM_CH1;
 
     // can't play
     return -1;
 }
 
-bool NO_INLINE XGM2_playPCMEx(const u8 *sample, const u32 len, const SoundPCMChannel channel, const u8 priority, const bool halfRate, const bool loop)
+NO_INLINE bool XGM2_playPCMEx(const u8 *sample, const u32 len, const SoundPCMChannel channel, const u8 priority, const bool halfRate, const bool loop)
 {
 
     // load the appropriate driver if not already done
-    Z80_loadDriver(Z80_DRIVER_XGM2, TRUE);
+    XGM2_loadDriver(TRUE);
 
     // get channel
     const s16 ch = (channel == SOUND_PCM_CH_AUTO)?getPCMChannel(priority):channel;
@@ -592,9 +603,7 @@ bool NO_INLINE XGM2_playPCMEx(const u8 *sample, const u32 len, const SoundPCMCha
         // channel playing and prio > new prio ? --> cannot play on this channel
         if (playing && (prio > priority))
         {
-            if (!busTaken) Z80_releaseBus();
-            SYS_enableInts();
-
+            releaseAccess(busTaken);
             return FALSE;
         }
     }
@@ -627,8 +636,7 @@ bool NO_INLINE XGM2_playPCMEx(const u8 *sample, const u32 len, const SoundPCMCha
     // set play PCM channel command
     *pb |= (XGM2_COM_PLAY_PCM_BASE << ch);
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     return TRUE;
 }
@@ -649,33 +657,33 @@ static void doFade(const u16 fmVolStart, const u16 fmVolEnd, const u16 psgVolSta
 {
     if (frame == 0) return;
 
-    f16 fmVolStartF = intToFix16(fmVolStart);
-    f16 psgVolStartF = intToFix16(psgVolStart);
-    f16 fmVolEndF = intToFix16(fmVolEnd);
-    f16 psgVolEndF = intToFix16(psgVolEnd);
+    f16 fmVolStartF = FIX16(fmVolStart);
+    f16 psgVolStartF = FIX16(psgVolStart);
+    f16 fmVolEndF = FIX16(fmVolEnd);
+    f16 psgVolEndF = FIX16(psgVolEnd);
     // we use "/ 2" as we alternate PSG and FM volume update on fading
-    f16 frameF = intToFix16(frame / 2);
+    f16 frameF = FIX16(frame) / 2;
 
     // set fade process variables
     fadeFMVol = fmVolStartF;
     fadePSGVol = psgVolStartF;
-    fadeFMVolStep = fix16Div(fmVolEndF - fmVolStartF, frameF);
-    fadePSGVolStep = fix16Div(psgVolEndF - psgVolStartF, frameF);
+    fadeFMVolStep = F16_div(fmVolEndF - fmVolStartF, frameF);
+    fadePSGVolStep = F16_div(psgVolEndF - psgVolStartF, frameF);
     fadeCount = frame;
     fadeEndProcess = fep;
 
     // init fade
-    setFMVolume(fix16ToInt(fadeFMVol));
-    setPSGVolume(fix16ToInt(fadePSGVol));
+    setFMVolume(F16_toInt(fadeFMVol));
+    setPSGVolume(F16_toInt(fadePSGVol));
 
     // add task for vblank process
-    VBlankProcess |= PROCESS_XGM2_FADE_TASK;
+    Z80_setVIntCallback(&vintFadeProcess);
 }
 
 
 bool XGM2_isProcessingFade(void)
 {
-    return (VBlankProcess & PROCESS_XGM2_FADE_TASK)?TRUE:FALSE;
+    return (Z80_getVIntCallback() != NULL)?TRUE:FALSE;
 }
 
 void XGM2_fadeIn(const u16 frame)
@@ -703,53 +711,8 @@ void XGM2_fadeTo(const u16 toFMVolume, const u16 toPSGVolume, const u16 frame)
     doFade(fmVol, toFMVolume, psgVol, toPSGVolume, frame, DO_NOTHING);
 }
 
-bool XGM2_doVBlankFadeProcess(void)
-{
-    fadeCount--;
 
-    // we do that to lower a bit Z80 CPU processing for volume fade effect
-    if (fadeCount & 1)
-    {
-        fadeFMVol += fadeFMVolStep;
-        setFMVolume(fix16ToInt(fadeFMVol));
-    }
-    else
-    {
-        fadePSGVol += fadePSGVolStep;
-        setPSGVolume(fix16ToInt(fadePSGVol));
-    }
-
-    // mark volume need to be restored
-    restoreVolume = TRUE;
-
-    // end of fade ?
-    if (fadeCount == 0)
-    {
-        // end process to do
-        switch(fadeEndProcess)
-        {
-            case DO_STOP:
-                XGM2_stop();
-                break;
-
-            case DO_PAUSE:
-                XGM2_pause();
-                break;
-
-            default:
-            case DO_NOTHING:
-                break;
-        }
-
-        // done
-        return FALSE;
-    }
-
-    return TRUE;
-}
-
-
-static void NO_INLINE setLoopNumber(const s8 value)
+static NO_INLINE void setLoopNumber(const s8 value)
 {
     // point to Z80 play loop parameter
     vu8* pb = (vu8*) XGM2_PLAY_ARG_LOOP;
@@ -760,8 +723,7 @@ static void NO_INLINE setLoopNumber(const s8 value)
     // set loop argument (0 = no loop, 0xFF = infinite)
     *pb = value;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 }
 
 void XGM2_setLoopNumber(s8 value)
@@ -776,10 +738,8 @@ u16 XGM2_getMusicTempo(void)
     return xgm2Tempo;
 }
 
-static void NO_INLINE setMusicTempo(const u16 value)
+static NO_INLINE void setMusicTempo(const u16 value)
 {
-    if (Z80_getLoadedDriver() != Z80_DRIVER_XGM2) return;
-
     xgm2Tempo = value;
     // compute tempo
     u16 adjTempo = divu(value << 8, IS_PAL_SYSTEM?50:60);
@@ -794,8 +754,7 @@ static void NO_INLINE setMusicTempo(const u16 value)
     // set tempo integer part first
     *pb = adjTempo >> 8;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 }
 
 void XGM2_setMusicTempo(const u16 value)
@@ -805,7 +764,7 @@ void XGM2_setMusicTempo(const u16 value)
     setMusicTempo(value);
 }
 
-u32 NO_INLINE XGM2_getElapsed(void)
+NO_INLINE u32 XGM2_getElapsed(void)
 {
     if (Z80_getLoadedDriver() != Z80_DRIVER_XGM2) return 0;
 
@@ -823,8 +782,7 @@ u32 NO_INLINE XGM2_getElapsed(void)
     *dst++ = *pb++;
     *dst = *pb;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     u32 result = (values[0] << 0) | (values[1] << 8) | ((u32) values[2] << 16);
 
@@ -834,7 +792,8 @@ u32 NO_INLINE XGM2_getElapsed(void)
     return result;
 }
 
-static void NO_INLINE setFMVolume(u16 value)
+
+static NO_INLINE void setFMVolume(u16 value)
 {
     // request Z80 bus access
     const bool busTaken = getAccess(XGM2_ACCESS_CMD_MSK);
@@ -849,11 +808,10 @@ static void NO_INLINE setFMVolume(u16 value)
     // set FM volume XGM2 command
     *pb |= XGM2_COM_SET_VOLUME_FM;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 }
 
-static void NO_INLINE setPSGVolume(u16 value)
+static NO_INLINE void setPSGVolume(u16 value)
 {
     // request Z80 bus access
     const bool busTaken = getAccess(XGM2_ACCESS_CMD_MSK);
@@ -868,15 +826,13 @@ static void NO_INLINE setPSGVolume(u16 value)
     // set PSG volume XGM2 command
     *pb |= XGM2_COM_SET_VOLUME_PSG;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 }
-
 
 void XGM2_setFMVolume(const u16 value)
 {
     // load the appropriate driver if not already done
-    Z80_loadDriver(Z80_DRIVER_XGM2, TRUE);
+    XGM2_loadDriver(TRUE);
 
     setFMVolume(value);
     // store it
@@ -886,7 +842,7 @@ void XGM2_setFMVolume(const u16 value)
 void XGM2_setPSGVolume(const u16 value)
 {
     // load the appropriate driver if not already done
-    Z80_loadDriver(Z80_DRIVER_XGM2, TRUE);
+    XGM2_loadDriver(TRUE);
 
     setPSGVolume(value);
     // store it
@@ -900,7 +856,7 @@ bool XGM2_isPAL(const u8 *xgm2)
 }
 
 
-u16 NO_INLINE XGM2_getCPULoad(const bool mean)
+NO_INLINE u16 XGM2_getCPULoad(const bool mean)
 {
     if (Z80_getLoadedDriver() != Z80_DRIVER_XGM2) return 0;
 
@@ -913,8 +869,7 @@ u16 NO_INLINE XGM2_getCPULoad(const bool mean)
     // get idle
     u16 idle = *pb;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     if (mean)
     {
@@ -935,7 +890,7 @@ u16 NO_INLINE XGM2_getCPULoad(const bool mean)
     return 100 - (mulu(idle, 100) / samplesPerFrame);
 }
 
-u16 NO_INLINE XGM2_getDMAWaitTime(const bool mean)
+NO_INLINE u16 XGM2_getDMAWaitTime(const bool mean)
 {
     if (Z80_getLoadedDriver() != Z80_DRIVER_XGM2) return 0;
 
@@ -948,8 +903,7 @@ u16 NO_INLINE XGM2_getDMAWaitTime(const bool mean)
     // get dma wait
     u16 dmaWait = *pb;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     if (mean)
     {
@@ -971,7 +925,7 @@ u16 NO_INLINE XGM2_getDMAWaitTime(const bool mean)
 }
 
 
-u16 NO_INLINE XGM2_getDebugFrameCounter(void)
+NO_INLINE u16 XGM2_getDebugFrameCounter(void)
 {
     if (Z80_getLoadedDriver() != Z80_DRIVER_XGM2) return 0;
 
@@ -982,13 +936,12 @@ u16 NO_INLINE XGM2_getDebugFrameCounter(void)
 
     u16 frameCounter = pb[0] | (pb[1] << 8);
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     return frameCounter;
 }
 
-u16 NO_INLINE XGM2_getDebugPCMRate(void)
+NO_INLINE u16 XGM2_getDebugPCMRate(void)
 {
     if (Z80_getLoadedDriver() != Z80_DRIVER_XGM2) return 0;
 
@@ -1000,14 +953,13 @@ u16 NO_INLINE XGM2_getDebugPCMRate(void)
     // the value give the number of played sample per frame
     u8 playedSamplesPerFrame = *pb;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     // compute playback rate
     return mulu(playedSamplesPerFrame, IS_PAL_SYSTEM?50:60);
 }
 
-u8 NO_INLINE XGM2_getDebugMissedFrames(void)
+NO_INLINE u8 XGM2_getDebugMissedFrames(void)
 {
     if (Z80_getLoadedDriver() != Z80_DRIVER_XGM2) return 0;
 
@@ -1020,13 +972,12 @@ u8 NO_INLINE XGM2_getDebugMissedFrames(void)
     // get missed frames (8 bit value, not really important)
     u8 result = *pb;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     return result;
 }
 
-u8 NO_INLINE XGM2_getDebugProcessDuration(const u16 ind)
+NO_INLINE u8 XGM2_getDebugProcessDuration(const u16 ind)
 {
     if (Z80_getLoadedDriver() != Z80_DRIVER_XGM2) return 0;
 
@@ -1037,8 +988,7 @@ u8 NO_INLINE XGM2_getDebugProcessDuration(const u16 ind)
 
     u8 processDuration = *pb;
 
-    if (!busTaken) Z80_releaseBus();
-    SYS_enableInts();
+    releaseAccess(busTaken);
 
     return processDuration;
 }
@@ -1072,6 +1022,12 @@ static bool getAccess(const u8 flag)
     return busTaken;
 }
 
+static void releaseAccess(const bool busTaken)
+{
+    if (!busTaken) Z80_releaseBus();
+    SYS_enableInts();
+}
+
 static void initLoadCalculation(void)
 {
     memset(xgm2IdleTab, 0, 8);
@@ -1081,4 +1037,47 @@ static void initLoadCalculation(void)
     xgm2WaitTabInd = 0;
     xgm2IdleMean = 0;
     xgm2WaitMean = 0;
+}
+
+static void vintFadeProcess(void)
+{
+    fadeCount--;
+
+    // we do that to lower a bit Z80 CPU processing for volume fade effect
+    if (fadeCount & 1)
+    {
+        fadeFMVol += fadeFMVolStep;
+        setFMVolume(F16_toInt(fadeFMVol));
+    }
+    else
+    {
+        fadePSGVol += fadePSGVolStep;
+        setPSGVolume(F16_toInt(fadePSGVol));
+    }
+
+    // mark volume need to be restored
+    restoreVolume = TRUE;
+
+    // end of fade ?
+    if (fadeCount == 0)
+    {
+        // end process to do
+        switch(fadeEndProcess)
+        {
+            case DO_STOP:
+                XGM2_stop();
+                break;
+
+            case DO_PAUSE:
+                XGM2_pause();
+                break;
+
+            default:
+            case DO_NOTHING:
+                break;
+        }
+
+        // done
+        Z80_setVIntCallback(NULL);
+    }
 }

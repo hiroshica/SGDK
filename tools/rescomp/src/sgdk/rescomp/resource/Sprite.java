@@ -34,7 +34,7 @@ public class Sprite extends Resource
 
     public final Palette palette;
 
-    public Sprite(String id, String imgFile, int wf, int hf, Compression compression, int time, CollisionType collision, OptimizationType optType,
+    public Sprite(String id, String imgFile, int wf, int hf, Compression compression, int[][] time, CollisionType collision, OptimizationType optType,
             OptimizationLevel optLevel, boolean showCut, boolean optDuplicate) throws Exception
     {
         super(id);
@@ -46,7 +46,7 @@ public class Sprite extends Resource
 
         // frame size over limit (we need VDP sprite offset to fit into u8 type)
         if ((wf >= 32) || (hf >= 32))
-            throw new IllegalArgumentException("SPRITE '" + id + "' has frame width or frame height >= 32 (not supported)");
+            throw new IllegalArgumentException("SPRITE '" + id + "' has frame width or frame height >= 32 tiles (not supported)");
 
         // set frame size
         this.wf = wf;
@@ -64,7 +64,7 @@ public class Sprite extends Resource
         final int maxIndex = ArrayMath.max(image, false);
         if (maxIndex >= 64)
             throw new IllegalArgumentException("'" + imgFile
-                    + "' uses color index >= 64, SPRITE resource requires image with a maximum of 64 colors, use 4bpp image instead if you are unsure.");
+                    + "' uses color index >= 64, SPRITE resource requires image with a maximum of 64 colors, use 4bpp indexed colors image instead if you are unsure.");
 
         // retrieve basic infos about the image
         final BasicImageInfo imgInfo = ImageUtil.getBasicInfo(imgFile);
@@ -81,7 +81,7 @@ public class Sprite extends Resource
         catch (IllegalArgumentException e)
         {
             throw new IllegalArgumentException(
-                    "'" + imgFile + "' SPRITE resource use more than 1 palette (16 colors), use 4bpp image instead if you are unsure.", e);
+                    "'" + imgFile + "' SPRITE resource use more than 1 palette (16 colors), use 4bpp indexed colors image instead if you are unsure.", e);
         }
         // get size in tile
         final int wt = w / 8;
@@ -96,8 +96,8 @@ public class Sprite extends Resource
         // build PALETTE
         palette = (Palette) addInternalResource(new Palette(id + "_palette", imgFile, palIndex * 16, 16, true));
 
-        // for debug purpose
-        final BufferedImage bufImg = ImageUtil.load(imgFile);
+        // for debug purpose (scale image x2 so it's easier to see bounding boxes)
+        final BufferedImage bufImg = ImageUtil.scale(ImageUtil.load(imgFile), w * 2 , h * 2, false);
         final Graphics2D g2 = bufImg.createGraphics();
         g2.setColor(Color.pink);
 
@@ -108,7 +108,7 @@ public class Sprite extends Resource
         for (int i = 0; i < numAnim; i++)
         {
             // build sprite animation
-            SpriteAnimation animation = new SpriteAnimation(id + "_animation" + i, image, wt, ht, i, wf, hf, time, collision, compression, optType, optLevel, optDuplicate);
+            SpriteAnimation animation = new SpriteAnimation(id + "_animation" + i, image, wt, ht, i, wf, hf, time[Math.min(time.length - 1, i)], collision, compression, optType, optLevel, optDuplicate);
 
             // check if empty
             if (!animation.isEmpty())
@@ -119,10 +119,12 @@ public class Sprite extends Resource
                 if (showCut)
                 {
                     int xOff = 0;
+                    // add 32 pixels margin for RGB image (contains palette data in row 0-31)
+                    int yMargin = (imgInfo.bpp > 8) ? 32 : 0;
                     for (SpriteFrame frame : animation.frames)
                     {
                         for (VDPSprite spr : frame.vdpSprites)
-                            g2.drawRect(xOff + spr.offsetX, yOff + spr.offsetY, spr.wt * 8, spr.ht * 8);
+                            g2.drawRect((xOff + spr.offsetX) * 2, (yMargin + yOff + spr.offsetY) * 2, ((spr.wt * 8) * 2) - 1, ((spr.ht * 8) * 2) - 1);
 
                         // for debug purpose
                         xOff += wf * 8;
@@ -179,7 +181,7 @@ public class Sprite extends Resource
     @Override
     public String toString()
     {
-        return id + ": wf=" + wf + " hf=" + hf + " numAnim=" + animations.size() + " maxNumTile=" + maxNumSprite + " maxNumSprite=" + maxNumSprite;
+        return id + ": wf=" + wf + " hf=" + hf + " numAnim=" + animations.size() + " maxNumTile=" + maxNumTile + " maxNumSprite=" + maxNumSprite;
     }
 
     @Override

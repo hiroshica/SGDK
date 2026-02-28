@@ -14,6 +14,7 @@ import sgdk.rescomp.type.Basics.Compression;
 import sgdk.rescomp.type.Basics.PackedData;
 import sgdk.rescomp.type.Basics.SoundDriver;
 import sgdk.rescomp.type.Basics.TileOptimization;
+import sgdk.rescomp.type.Basics.TileOrdering;
 import sgdk.rescomp.type.SpriteCell.OptimizationLevel;
 import sgdk.rescomp.type.SpriteCell.OptimizationType;
 import sgdk.tool.FileUtil;
@@ -153,6 +154,18 @@ public class Util
 
         throw new IllegalArgumentException("Unrecognized sprite optimization level: '" + text + "'");
     }
+    
+    public static TileOrdering getTileOrdering(String text)
+    {
+        final String upText = text.toUpperCase();
+
+        if (StringUtil.equals(upText, "COLUMN"))
+            return TileOrdering.COLUMN;
+        if (StringUtil.equals(upText, "ROW"))
+            return TileOrdering.ROW;
+
+        throw new IllegalArgumentException("Unrecognized tile ordering: '" + text + "'");
+    }
 
     public static Color getColor(String string)
     {
@@ -210,6 +223,14 @@ public class Util
         // include declaration
         if (global)
             outH.append("extern const " + type + " " + name + "[" + size + "];\n");
+    }
+
+    public static void declArrayEnd(StringBuilder outS, StringBuilder outH, String type, String name, int size, int align, boolean global)
+    {
+        // asm size label
+        if (global)
+            outS.append("    .global " + name + "_size\n");
+        outS.append(name + "_size = .-" + name + "\n");
     }
 
     // public static void outS(StringBuilder out, byte[] data, int intSize)

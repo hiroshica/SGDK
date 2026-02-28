@@ -16,14 +16,14 @@
 #define SYSTEM_PAL      1
 
 
-const char* version = "1.74";
+const char* version = "1.76";
 int sys;
 bool silent;
 bool verbose;
 bool sampleRateFix;
 bool sampleIgnore;
 bool delayKeyOff;
-
+bool keepRF5C68Cmds;
 
 int main(int argc, char *argv[ ])
 {
@@ -32,7 +32,7 @@ int main(int argc, char *argv[ ])
 
     if (argc < 3)
     {
-        printf("XGMTool %s - Stephane Dallongeville - copyright 2020\n", version);
+        printf("XGMTool %s - Stephane Dallongeville - copyright 2024\n", version);
         printf("\n");
         printf("Usage: xgmtool inputFile outputFile <options>\n");
         printf("XGMTool can do the following operations:\n");
@@ -80,6 +80,7 @@ int main(int argc, char *argv[ ])
         printf("-di\tdisable PCM sample auto ignore (it can help when PCM are not properly extracted).\n");
         printf("-dr\tdisable PCM sample rate auto fix (it can help when PCM are not properly extracted).\n");
         printf("-dd\tdisable delayed KEY OFF event when we have KEY ON/OFF in a single frame (it can fix incorrect instrument sound).\n");
+        printf("-r\tkeep RF5C68 and RF5C164 register write commands.\n");
 
         exit(1);
     }
@@ -90,6 +91,7 @@ int main(int argc, char *argv[ ])
     sampleIgnore = true;
     sampleRateFix = true;
     delayKeyOff = true;
+    keepRF5C68Cmds = false;
 
     // Open source for binary read (will fail if file does not exist)
     if ((infile = fopen(argv[1], "rb")) == NULL)
@@ -130,6 +132,8 @@ int main(int argc, char *argv[ ])
             sys = SYSTEM_NTSC;
         else if (!strcasecmp(argv[i], "-p"))
             sys = SYSTEM_PAL;
+        else if (!strcasecmp(argv[i], "-r"))
+            keepRF5C68Cmds = true;
         else
             printf("Warning: option %s not recognized (ignored)\n", argv[i]);
     }

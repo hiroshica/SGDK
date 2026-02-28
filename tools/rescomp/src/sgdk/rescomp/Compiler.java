@@ -50,6 +50,7 @@ import sgdk.rescomp.resource.internal.SpriteAnimation;
 import sgdk.rescomp.resource.internal.SpriteFrame;
 import sgdk.rescomp.resource.internal.VDPSprite;
 import sgdk.rescomp.type.Basics.Compression;
+import sgdk.rescomp.type.TMX;
 import sgdk.tool.FileUtil;
 import sgdk.tool.StringUtil;
 
@@ -96,11 +97,11 @@ public class Compiler
     public final static Set<String> resourcesFile = new HashSet<>();
 
     public static boolean extensionsLoaded = false;
-    
-    // TODO: set that to false on release 
+
+    // TODO: set that to false on release
     public static boolean DAGame = false;
 
-    public static boolean compile(String fileName, String fileNameOut, boolean header, String depTarget)
+    public static boolean compile(String fileName, String fileNameOut, boolean asm, boolean header, String depTarget)
     {
         // get application directory
         // currentDir = new File("").getAbsolutePath();
@@ -131,7 +132,7 @@ public class Compiler
         int align = -1;
         boolean group = true;
         boolean near = false;
-
+        
         // process input resource file line by line
         for (String l : lines)
         {
@@ -189,6 +190,9 @@ public class Compiler
             }
         }
 
+        // Cross-checking all SObjects and resolving object field references
+        TMX.TMXObjects.resolveObjectsReferencesInResourceList(resourcesList);
+     
         // separate output
         System.out.println();
 
@@ -207,6 +211,7 @@ public class Compiler
             headerName += "_" + FileUtil.getFileName(fileNameOut, false);
             headerName = headerName.toUpperCase();
 
+            outH.append("#include <genesis.h>\n\n");
             outH.append("#ifndef _" + headerName + "_H_\n");
             outH.append("#define _" + headerName + "_H_\n\n");
 
@@ -250,7 +255,8 @@ public class Compiler
 
             // get all non BIN resources
             final List<Resource> nonBinResources = getNonBinResources();
-            // get non BIN resources for VDPSprite and Collision (they can be compressed as binary data doesn't store any pointer/reference)
+            // get non BIN resources for VDPSprite and Collision (they can be compressed as binary data doesn't store
+            // any pointer/reference)
             final List<Resource> vdpSpriteResources = getResources(VDPSprite.class);
             final List<Resource> collisionResources = getResources(Collision.class);
 
@@ -384,9 +390,12 @@ public class Compiler
         try
         {
             // save .s file
-            out = new BufferedWriter(new FileWriter(fileNameOut));
-            out.write(outS.toString());
-            out.close();
+            if (asm)
+            {
+	            out = new BufferedWriter(new FileWriter(fileNameOut));
+	            out.write(outS.toString());
+	            out.close();
+            }
             // save .h file
             if (header)
             {
@@ -421,48 +430,42 @@ public class Compiler
         if (rescompExt.exists())
         {
             // build the class loader
+            @SuppressWarnings("resource")
             final URLClassLoader classLoader = new URLClassLoader(new URL[] {rescompExt.toURI().toURL()}, Compiler.class.getClassLoader());
 
-            try
+            // get all classes from JAR file
+            for (String className : findClassNamesInJAR(rescompExt.getAbsolutePath()))
             {
-                // get all classes from JAR file
-                for (String className : findClassNamesInJAR(rescompExt.getAbsolutePath()))
+                try
                 {
+                    // try to load class
+                    final Class<?> clazz = classLoader.loadClass(className);
+
                     try
                     {
-                        // try to load class
-                        final Class<?> clazz = classLoader.loadClass(className);
+                        // is a processor class ?
+                        final Class<? extends Processor> processorClass = clazz.asSubclass(Processor.class);
+                        // create the processor
+                        final Processor processor = processorClass.newInstance();
 
-                        try
-                        {
-                            // is a processor class ?
-                            final Class<? extends Processor> processorClass = clazz.asSubclass(Processor.class);
-                            // create the processor
-                            final Processor processor = processorClass.newInstance();
+                        // and add to processor list
+                        resourceProcessors.add(processor);
 
-                            // and add to processor list
-                            resourceProcessors.add(processor);
-
-                            System.out.println("Extension '" + processor.getId() + "' loaded.");
-                        }
-                        catch (Throwable t)
-                        {
-                            // not a processor --> ignore
-                        }
-                    }
-                    catch (UnsupportedClassVersionError e)
-                    {
-                        System.err.println("Class '" + className + "' cannot be loaded: newer java required.");
+                        System.out.println("Extension '" + processor.getId() + "' loaded.");
                     }
                     catch (Throwable t)
                     {
-                        System.err.println("Class '" + className + "' cannot be loaded:" + t.getMessage());
+                        // not a processor --> ignore
                     }
                 }
-            }
-            finally
-            {
-                classLoader.close();
+                catch (UnsupportedClassVersionError e)
+                {
+                    System.err.println("Class '" + className + "' cannot be loaded: newer java required.");
+                }
+                catch (Throwable t)
+                {
+                    System.err.println("Class '" + className + "' cannot be loaded:" + t.getMessage());
+                }
             }
         }
     }
@@ -799,7 +802,7 @@ public class Compiler
                 if (resourceType.equalsIgnoreCase(rp.getId()))
                     return rp;
         }
-        
+
         return null;
     }
 }

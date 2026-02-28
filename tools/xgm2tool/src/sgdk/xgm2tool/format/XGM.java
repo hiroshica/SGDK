@@ -906,7 +906,7 @@ public class XGM
         boolean canCombineON = false;
         XGMFMCommand setFreq = null;
 
-        // isolated key-on / key-off combine
+        // isolated key-off/on sequence combine
         for (XGMFMCommand com : fmChannelCommands)
         {
             if (com.isYMKeyOFFWrite())
@@ -926,12 +926,26 @@ public class XGM
             }
             else if (com.isYMSetTL() || com.isYMKeyAdvWrite() || com.isYMKeySequence() || com.isYMLoadInst() || com.isYMWrite())
             {
-                // not yet meet the set freq command ? --> cancel combination
-                if (setFreq == null)
+                // meet a set freq command ? --> combine now
+                if (setFreq != null)
                 {
-                    canCombineOFF = false;
-                    canCombineON = false;
+                    if (canCombineOFF)
+                    {
+                        setFreq.setYMFreqKeyOFF();
+                        lastKeyOFF.setDummy();
+                    }
+                    if (canCombineON)
+                    {
+                        setFreq.setYMFreqKeyON();
+                        lastKeyON.setDummy();
+                    }
                 }
+                
+                // done
+                canCombineOFF = false;
+                canCombineON = false;
+                setFreq = null;
+                hasKeyOn = false;
             }
             // the driver does not support key on/off on setFreq special
             else if (com.isYMFreqWrite() && !com.isYMFreqSpecialWrite())
@@ -942,14 +956,15 @@ public class XGM
             }
         }
 
+        // last set Freq to combine ?
         if (setFreq != null)
         {
-            if (canCombineOFF && !setFreq.isYMFreqWithKeyOFF())
+            if (canCombineOFF)
             {
                 setFreq.setYMFreqKeyOFF();
                 lastKeyOFF.setDummy();
             }
-            if (canCombineON && !setFreq.isYMFreqWithKeyON())
+            if (canCombineON)
             {
                 setFreq.setYMFreqKeyON();
                 lastKeyON.setDummy();
@@ -1239,10 +1254,14 @@ public class XGM
             // optimized command is not the last frame command ?
             if ((indOpt != -1) && (indOpt != (frameCommands.size() - 2)))
             {
-                // swap with last command
-                final int ind1 = FMcommands.indexOf(frameCommands.get(indOpt));
+                final XGMFMCommand comOpt = frameCommands.get(indOpt);
+                final int ind1 = FMcommands.indexOf(comOpt);
                 final int ind2 = FMcommands.indexOf(frameCommands.get(frameCommands.size() - 2));
-                Collections.swap(FMcommands, ind1, ind2);
+
+                // move to last command (don't swap)                
+                FMcommands.add(ind2 + 1, comOpt);
+                FMcommands.remove(ind1);               
+                // Collections.swap(FMcommands, ind1, ind2);
             }
         }
 

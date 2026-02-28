@@ -1,7 +1,7 @@
 #include <genesis.h>
 
-#include "gfx.h"
-#include "spr_res.h"
+#include "res/gfx.h"
+#include "res/spr_res.h"
 
 //#define TEST_SPR
 #define MAX_OBJECT      80
@@ -867,8 +867,8 @@ u16 executeSpritesTest(u16 *scores)
     PAL_setColors(0, palette, 64, CPU);
     SYS_enableInts();
 
-    // execute sprite bench
-    execute(25, 12) / 8;
+    // execute sprite bench (result not used in score)
+    execute(25, 12);
 #endif // LEGACY_SPRITE_ENGINE
 
     SPR_logProfil();
@@ -996,7 +996,7 @@ static void updatePartic(u16 num, u16 preloadedTiles, u16 realloc)
         if (o->timer >= 10) o->timer = 0;
 
         // update sprite position
-        SPR_setPosition(s, fix16ToInt(o->pos.x), 224 - fix16ToInt(o->pos.y));
+        SPR_setPosition(s, F16_toInt(o->pos.x), 224 - F16_toInt(o->pos.y));
         // animate (30 FPS)
         if (o->timer & 1)
         {
@@ -1028,8 +1028,8 @@ static u16 executePartic(u16 time, u16 numPartic, u16 preloadedTiles, u16 reallo
         // update sprites
         SPR_update();
 
-        VDP_showFPS(FALSE);
-        VDP_showCPULoad();
+        VDP_showFPS(FALSE, 1, 1);
+        VDP_showCPULoad(1, 2);
         SYS_doVBlankProcess();
         cpuLoad = SYS_getCPULoad();
 
@@ -1181,8 +1181,8 @@ static u16 executeDonut(u16 time, u16 preloadedTiles)
         // update sprites
         SPR_update();
 
-        VDP_showFPS(FALSE);
-        VDP_showCPULoad();
+        VDP_showFPS(FALSE, 1, 1);
+        VDP_showCPULoad(1, 2);
 
         SYS_doVBlankProcess();
         cpuLoad = SYS_getCPULoad();
@@ -1259,9 +1259,9 @@ static void updatePos(u16 num)
 #endif
 
         // set sprite position
-        SPR_setPosition(s, fix16ToInt(o->pos.x), fix16ToInt(o->pos.y));
+        SPR_setPosition(s, F16_toInt(o->pos.x), F16_toInt(o->pos.y));
         // set sprite depth
-        SPR_setDepth(s, (300 - fix16ToInt(o->pos.y)) >> 4);
+        SPR_setDepth(s, (300 - F16_toInt(o->pos.y)) >> 4);
 
         sprite++;
     }
@@ -1310,8 +1310,8 @@ static u16 execute(u16 time, u16 numSpr)
         // update sprites
         SPR_update();
 
-        VDP_showFPS(FALSE);
-        VDP_showCPULoad();
+        VDP_showFPS(FALSE, 1, 1);
+        VDP_showCPULoad(1, 2);
         SYS_doVBlankProcess();
         cpuLoad = SYS_getCPULoad();
 

@@ -17,17 +17,18 @@
 *.ini
 *.rs
 *.d
+**/cmd_
 **/.DS_Store
 **/.settings/**
-**/out/**
+**/out
+**/res/*.h
 !**/out/rom.bin
-symbol.txt
-rom_head.bin
+!out/release/res/*.h
+!out/debug/res/*.h
+**/symbol.txt
+**/rom_head.bin
 **/Debug
 **/Release
-**/res/*.h
-res/libres.s
-!res/libres.h
 archive
 cb
 not needed
@@ -42,6 +43,7 @@ tools/lz4w/lz4w.jar
 tools/rescomp/format
 tools/rescomp/rescomp.jar
 tools/xgm rom builder
+<<<<<<< HEAD
 /.idea
 *.iml
 lib/libmd.a
@@ -54,3 +56,9 @@ src/snd/pcm/drv_dpcm2.s
 src/snd/pcm/drv_pcm.s
 src/snd/pcm/drv_pcm4.s
 src/snd/xgm2/drv_xgm2.s
+=======
+project/test
+tools/.gradle/
+tools/.project
+tools/build/
+>>>>>>> cb114acadc454440fcddd616d9a7dd5a693b1b13

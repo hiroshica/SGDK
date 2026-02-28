@@ -1,5 +1,6 @@
 #include "config.h"
 #include "types.h"
+#include "sys.h"
 
 #include "ym2612.h"
 
@@ -19,7 +20,7 @@ static void writeChannelReg(u16 port, u8 ch, u8 reg, u8 value)
     YM2612_write((port * 2) + 1, value);
 }
 
-void NO_INLINE YM2612_reset()
+NO_INLINE void YM2612_reset()
 {
     u16 p, ch, sl;
     u16 busTaken;
@@ -38,7 +39,7 @@ void NO_INLINE YM2612_reset()
     YM2612_write(0, 0x2B);
     YM2612_write(1, 0x00);
 
-    for(p = 0; p < 1; p++)
+    for(p = 0; p < 2; p++)
     {
         for(ch = 0; ch < 3; ch++)
         {
@@ -62,7 +63,7 @@ void NO_INLINE YM2612_reset()
         }
     }
 
-    for(p = 0; p < 1; p++)
+    for(p = 0; p < 2; p++)
     {
         for(ch = 0; ch < 3; ch++)
         {

@@ -82,6 +82,16 @@
 #define LEGACY_SPRITE_ENGINE    0
 
 /**
+ * \brief
+ *      Set it to 1 to use the original SGDK's error handling screen and vectors.<br>
+ *      Otherwise error handler from the MD Debugger project is used, which supports source code symbols with "debug" build proifle and backtrace.<br>
+ *
+ *      The new error handler, however, completely takes over exception vectors and doesn't allow to set your own callbacks for errors (e.g. addressErrorCB).<br>
+ *      If you rely on callbacks to override error handling behavior, consider using legacy system instead.
+ */
+#define LEGACY_ERROR_HANDLER    0
+
+/**
  *  \brief
  *      Set it to 1 to enable automatic bank switch using official SEGA mapper for ROM > 4MB.
  *
@@ -117,19 +127,6 @@
 
 /**
  *  \brief
- *      To force method inlining (not sure that GCC does actually care of it)
- */
-#define FORCE_INLINE            inline __attribute__((always_inline))
-
-/**
- *  \brief
- *      To force no inlining for this method
- */
-#define NO_INLINE               __attribute__ ((noinline))
-
-
-/**
- *  \brief
  *      Set it to 1 if you want to use EVERDRIVE programming methods (written by Krikzz).
  */
 #define MODULE_EVERDRIVE        0
@@ -148,22 +145,54 @@
 
 /**
  *  \brief
- *      Set it to 1 if you want to enable MegaWiFi functions and support code (written by Jesus Alonso - doragasu) */
-#define MODULE_MEGAWIFI         0
+ *      Set it to 1 if you want to use PORT_2 or PORT_EXT as Serial port COMM.
+ */
+#define MODULE_SERIAL            0
 
+/**
+ *  \brief
+ *      Set it to 1 if you want to enable MegaWiFi functions and support code (written by Jesus Alonso - doragasu)
+ */
+#define MODULE_MEGAWIFI         0
+#if MODULE_MEGAWIFI
+
+#define MEGAWIFI_IMPLEMENTATION_CROSS    0x01    // Cross (Serial)
+#define MEGAWIFI_IMPLEMENTATION_MW_CART  0x02    // MegaWiFi Cart: Defined to use MegaWiFi Cart distributions
+#define MEGAWIFI_IMPLEMENTATION_ED       0x04    // EverDrive: Defined to use EverDrive distributions (testing purposes)
+#define MEGAWIFI_IMPLEMENTATION       (MEGAWIFI_IMPLEMENTATION_CROSS | MEGAWIFI_IMPLEMENTATION_ED) // Set the implementation to use
+// Caution USING BOTH MW_CART AND EVERDRIVE IMPLEMENTATIONS MAY CAUSE ISSUES AS THEY BOTH USE SAME COMM VTABLE STRUCTURE
+// MAKE SURE TO TEST PROPERLY IF YOU ENABLE BOTH IMPLEMENTATIONS
+
+// Check that if using cross implementation, serial module is enabled
+// Serial module is required for cross implementation
+#if ((MODULE_SERIAL == 0) && (MEGAWIFI_IMPLEMENTATION & MEGAWIFI_IMPLEMENTATION_CROSS))
+#error "Cannot enable MegaWiFi cross implementation without SERIAL module"
+#endif
+// Check that if using EverDrive implementation, EverDrive module is enabled
+// Switching banks is required for EverDrive implementation
+#if ((ENABLE_BANK_SWITCH == 0) && (MEGAWIFI_IMPLEMENTATION & MEGAWIFI_IMPLEMENTATION_ED))
+#error "Cannot enable MegaWiFi module without BANK SWITCH"
+#endif
+
+#endif // MODULE_MEGAWIFI
 /**
  *  \brief
  *      Set it to 1 if you want to enable Flash Save functions (written by Jesus Alonso - doragasu).<br>
  *      There is no reason to disable it as it doesn't consume extra memory
-  */
+ */
 #define MODULE_FLASHSAVE        1
 
 /**
  *  \brief
  *      Set it to 1 if you want to enable the TTY text console module (written by Andreas Dietrich).<br>
- *      It consume about 34 bytes of memory when enabled.
-  */
+ *      It consume about 28 bytes of memory when enabled.
+ */
 #define MODULE_CONSOLE          1
 
+/**
+ *  \brief
+ *      Set it to 1 if you want to enable Link Cable Protocol functions (written by BlodTor)
+ */
+#define MODULE_LINK_CABLE       0
 
 #endif // _CONFIG_

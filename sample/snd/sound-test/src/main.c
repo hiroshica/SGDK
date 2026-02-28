@@ -1,4 +1,4 @@
-#include "genesis.h"
+#include <genesis.h>
 
 #include "resources.h"
 
@@ -139,7 +139,7 @@ int main()
         for(j = 0, cur_cmd = cur_driver->cmds; j < MAX_CMD; j++, cur_cmd++)
             params_value[i][j] = cur_cmd->params;
 
-    PAL_setPalette(PAL0, font_pal_lib.data, CPU);
+    PAL_setPalette(PAL0, font_pal_default, CPU);
     PAL_setColor((PAL1 * 16) + 15, 0x0888);
     VDP_setTextPalette(PAL0);
     VDP_drawText("Current Z80 driver", 10, 1);
@@ -176,7 +176,7 @@ static void refreshDriverInfos()
         case Z80_DRIVER_XGM:
             if (musicSize)
             {
-                fix32ToStr(intToFix32(musicSize / 1024), size, 1);
+                fix32ToStr(FIX32(musicSize / 1024), size, 1);
                 sprintf(str, "Music size = %s KB", size);
                 VDP_drawText(str, 2, 7);
             }
@@ -185,7 +185,7 @@ static void refreshDriverInfos()
         case Z80_DRIVER_XGM2:
             if (musicSize)
             {
-                fix32ToStr(intToFix32(musicSize / 1024), size, 1);
+                fix32ToStr(FIX32(musicSize / 1024), size, 1);
                 sprintf(str, "Music size = %s KB", size);
                 VDP_drawText(str, 2, 7);
             }
@@ -601,7 +601,7 @@ static void joyEvent(u16 joy, u16 changed, u16 state)
             if (changed & state & BUTTON_X)
             {
                 XGM2_playPCM(snare1_13k, sizeof(snare1_13k), SOUND_PCM_CH1);
-//                XGM2_playPCM(sonic_jump_13k, sizeof(sonic_jump_13k), SOUND_PCM_CH1);
+//                XGM2_playPCM(india_13k, sizeof(india_13k), SOUND_PCM_CH1);
             }
             if (changed & state & BUTTON_Y)
             {

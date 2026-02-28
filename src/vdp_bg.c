@@ -9,7 +9,6 @@
 #include "dma.h"
 #include "vdp_tile.h"
 
-#include "font.h"
 #include "memory.h"
 #include "mapper.h"
 #include "sys.h"
@@ -224,7 +223,7 @@ void VDP_setTextPriority(u16 prio)
     text_basetile |= (prio & 1) << 15;
 }
 
-void VDP_drawTextEx(VDPPlane plane, const char *str, u16 basetile, u16 x, u16 y, TransferMethod tm)
+void VDP_drawTextEx(VDPPlane plane, const char* str, u16 basetile, u16 x, u16 y, TransferMethod tm)
 {
     u16 data[128];
     const u8 *s;
@@ -318,7 +317,7 @@ void VDP_clearTextAreaEx(VDPPlane plane, u16 basetile, u16 x, u16 y, u16 w, u16 
         VDP_setTileMapDataRowEx(plane, data, basetile, ya++, x, wa, tm);
 }
 
-void VDP_drawTextBG(VDPPlane plane, const char *str, u16 x, u16 y)
+void VDP_drawTextBG(VDPPlane plane, const char* str, u16 x, u16 y)
 {
     VDP_drawTextEx(plane, str, text_basetile, x, y, CPU);
 }
@@ -377,9 +376,40 @@ void VDP_clearTextLineBG(VDPPlane plane, u16 y)
     VDP_fillTileMapRect(plane, TILE_FONT_INDEX, 0, y, (plane == WINDOW)?windowWidth:planeWidth, 1);
 }
 
-void VDP_drawText(const char *str, u16 x, u16 y)
+void VDP_drawText(const char* str, u16 x, u16 y)
 {
     VDP_drawTextBG(text_plan, str, x, y);
+}
+
+void VDP_drawTextBGFill(VDPPlane plane, const char* str, u16 x, u16 y, u16 len)
+{
+    char fixedStr[len + 1];
+    char* dst = fixedStr;
+    const char* src;
+
+    src = str;
+    // copy str
+    while ((*dst++ = *src++));
+    // revert '\0' terminator
+    --dst;
+
+    u16 strSize = dst - fixedStr;
+    // remaining space to fill ?
+    if (strSize < len)
+    {
+        // append space chars
+        u16 fill = len - strSize;
+        while(fill--) *dst++ = ' ';
+    }
+    // set back terminator char
+    *dst = '\0';
+
+    VDP_drawTextBG(plane, fixedStr, x, y);
+}
+
+void VDP_drawTextFill(const char* str, u16 x, u16 y, u16 len)
+{
+    VDP_drawTextBGFill(text_plan, str, x, y, len);
 }
 
 void VDP_clearText(u16 x, u16 y, u16 w)

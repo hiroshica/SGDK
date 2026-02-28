@@ -44,8 +44,8 @@
 #define SPR_FLAG_INSERT_HEAD                    0x4000
 /**
  *  \brief
- *      Disable animation auto loop..<br>
- *      By default animation always restart fater the last frame has been played.
+ *      Disable animation auto loop.<br>
+ *      By default animation always restart after the last frame has been played.
  *      This flag prevent the animation to restart and so the animation end on the last frame forever (see #SPR_getAnimationDone(..))
  */
 #define SPR_FLAG_DISABLE_ANIMATION_LOOP         0x2000
@@ -215,7 +215,8 @@ typedef struct
  *      Sprite animation frame structure.
  *
  *  \param numSprite
- *      number of VDP sprite which compose this frame
+ *      number of VDP sprite which compose this frame.
+ *      bit 7 is used as a special flag for the sprite engine so always use 'numSprite & 0x7F' to just retrieve the number of sprite
  *  \param timer
  *      active time for this frame (in 1/60 of second)
  *  \param tileset
@@ -227,7 +228,7 @@ typedef struct
  */
 typedef struct
 {
-    u8 numSprite;
+    s8 numSprite;
     u8 timer;
     TileSet* tileset;                   // TODO: have a tileset per VDP sprite --> probably not a good idea performance wise
     Collision* collision;               // Require many DMA queue operations and fast DMA flush as well, also bring extra computing in calculating delayed update
@@ -640,9 +641,46 @@ void SPR_disableVDPSpriteChecking();
  *      Defragment allocated VRAM for sprites, that can help when sprite allocation fail (SPR_addSprite(..) or SPR_addSpriteEx(..) return <i>NULL</i>).
  */
 void SPR_defragVRAM(void);
+
 /**
  *  \brief
- *      Load all frames of SpriteDefinition (using DMA) at specified VRAM tile index and return the indexes table.<br>
+ *      Load all frames of SpriteDefinition using DMA at specified VRAM tile index and return the indexes table.<br>
+ *      <b>WARNING: This function should be call at init/loading time as it can be quite long (several frames)</b>
+ *
+ *  \param sprDef
+ *      the SpriteDefinition we want to load frame data in VRAM.
+ *  \param index
+ *      the tile position in VRAM where we will upload all sprite frame tiles data.
+ *  \param totalNumTile
+ *      if not NULL then the function will store here the total number of tile used to load all animation frames.
+  *  \param tm
+ *      Transfer method to upload sprite frame data.<br>
+ *      Accepted values are:<br>
+ *      - CPU<br>
+ *      - DMA<br>
+ *      - DMA_QUEUE<br>
+ *      - DMA_QUEUE_COPY<br>
+*
+ *   Load all frames of spriteDef at specified VRAM tile index and return the indexes table.<br>
+ *   The returned index table is a dynamically allocated 2D table[anim][frame] so you need to release it using #MEM_free(..)
+ *   when you don't need the table anymore.<br>
+ *   You can use the frame change callback (see #SPR_setFrameChangeCallback(..)) to automatically update the VRAM index using the indexes table:<br>
+ *   <code>frameIndexes = SPR_loadAllFrames(sprite->definition, ind);<br>
+ *   SPR_setFrameChangeCallback(sprite, &frameChanged);<br>
+ *   ....<br>
+ *   void frameChanged(Sprite* sprite)<br>
+ *   {<br>
+ *       u16 tileIndex = frameIndexes[sprite->animInd][sprite->frameInd];<br>
+ *       SPR_setVRAMTileIndex(sprite, tileIndex);<br>
+ *   }</code>
+ *
+ *  \return the 2D indexes table or NULL if there is not enough memory to allocate the table.
+ *  \see SPR_setFrameChangeCallback(...);
+ */
+u16** SPR_loadAllFramesEx(const SpriteDefinition* sprDef, u16 index, u16* totalNumTile, TransferMethod tm);
+/**
+ *  \brief
+ *      Same as all frames of SpriteDefinition at specified VRAM tile index and return the indexes table.<br>
  *      <b>WARNING: This function should be call at init/loading time as it can be quite long (several frames)</b>
  *
  *  \param sprDef
@@ -669,6 +707,45 @@ void SPR_defragVRAM(void);
  *  \see SPR_setFrameChangeCallback(...);
  */
 u16** SPR_loadAllFrames(const SpriteDefinition* sprDef, u16 index, u16* totalNumTile);
+/**
+ *  \brief
+ *      Same as #SPR_loadAllFrames(..) but only computes the indexes table without actually loading the Sprite frame data to VRAM (see #SPR_loadAllTiles(..) for that).
+ *
+ *  \param sprDef
+ *      the SpriteDefinition we want to compute the indexes table.
+ *  \param index
+ *      the tile position in VRAM where we want to upload all sprite frame data (note that VRAM data upload won't be done here).
+ *  \param totalNumTile
+ *      if not NULL then the function will store here the total number of tile used to load all animation frames.
+ *
+ *  \return the 2D indexes table or NULL if there is not enough memory to allocate the table.
+ *  \see SPR_loadAllFrames(...)
+ *  \see SPR_loadAllTiles(...)
+ */
+u16** SPR_loadAllIndexes(const SpriteDefinition* sprDef, u16 index, u16* totalNumTile);
+/**
+ *  \brief
+ *      Same as #SPR_loadAllFrames(..) but only perform the Sprite tile data upload process, SPR_loadAllIndexes(..) should be called first to compute the indexes table.
+ *
+ *  \param sprDef
+ *      the SpriteDefinition we want to load frame data in VRAM.
+ *  \param index
+ *      the tile position in VRAM where we will upload all sprite frame tiles data.
+ *  \param index
+ *      the 2D indexes table providing the tile index position in VRAM for each sprite frame (previously build using #SPR_loadAllIndexes(..) method).
+ *  \param tm
+ *      Transfer method to upload sprite frame data.<br>
+ *      Accepted values are:<br>
+ *      - CPU<br>
+ *      - DMA<br>
+ *      - DMA_QUEUE<br>
+ *      - DMA_QUEUE_COPY<br>
+ *
+ *  \return the number of tile uploaded to VRAM.
+ *  \see SPR_loadAllFrames(...)
+ *  \see SPR_loadAllIndexes(...)
+ */
+u16 SPR_loadAllTiles(const SpriteDefinition* sprDef, u16 index, u16** indexes, const TransferMethod tm);
 
 /**
  *  \brief
@@ -790,7 +867,6 @@ void SPR_setAlwaysOnTop(Sprite* sprite);
  *  \see SPR_setDepth(Sprite*)
  */
 void SPR_setAlwaysAtBottom(Sprite* sprite);
-
 /**
  *  \brief
  *      Set current sprite animation and frame.
@@ -831,10 +907,9 @@ void SPR_setFrame(Sprite* sprite, s16 frame);
  *      Sprite to pass to next frame for
  */
 void SPR_nextFrame(Sprite* sprite);
-
 /**
  *  \brief
- *      Enable/disable auto animation (default is on).<br>
+ *      Enable/disable auto animation for the current animation (default is on).<br>
  *
  *  \param sprite
  *      Sprite we want to enable/disable auto animation.
@@ -867,15 +942,14 @@ bool SPR_getAutoAnimation(Sprite* sprite);
 void SPR_setAnimationLoop(Sprite* sprite, bool value);
 /**
  *  \brief
- *      Return TRUE if animation ended / looped.<br>
- *      This can be used with the frame change callback (see #SPR_setFrameChangeCallback(..)) to detect
- *      the end of sprite animation and do appropriate action if required.
+ *      Returns TRUE if the sprite reached the end of the current animation.<br>
+ *      When auto animation is enabled (see SPR_setAutoAnimation(..)) the function returns TRUE only when we reached
+ *      the last *tick* of the last animation frame.<br>
+ *      When auto animation is disabled the function returns TRUE as soon we are on last animation frame.
  *
- *  \see SPR_FLAG_DISABLE_ANIMATION_LOOP
- *  \see #SPR_setAnimationLoop(Sprite*, bool)
+ *  \see #SPR_setAutoAnimation(Sprite*, bool)
  */
-bool SPR_getAnimationDone(Sprite* sprite);
-
+bool SPR_isAnimationDone(Sprite* sprite);
 /**
  *  \brief
  *      Set the VRAM tile position reserved for this sprite.

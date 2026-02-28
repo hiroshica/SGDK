@@ -168,7 +168,7 @@ u16  MEM_getLargestFreeBlock(void);
  * A block of memory previously allocated using a call to Mem_alloc is deallocated, making it available again for further allocations.
  * Notice that this function leaves the value of ptr unchanged, hence it still points to the same (now invalid) location, and not to the null pointer.
  */
-void MEM_free(void *ptr);
+void MEM_free(void* ptr);
 /**
  *  \brief
  *      Allocate memory block
@@ -205,9 +205,20 @@ void* MEM_alloc(u16 size);
 /**
  *  \brief
  *      Pack all free blocks and reset allocation search from start of heap.<br>
- *      You can call this method before trying to allocate small block of memory to reduce memory fragmentation.
+ *      You can call this method before trying to allocate small block of memory to reduce memory fragmentation.<br>
+ *      Note that since SGDK 2.12 the memory manager is doing "auto packing" operation so you don't need to call this method anymore.
  */
 void MEM_pack(void);
+
+/**
+ *  \brief
+ *      Performs a integrity test on memory manager and stack pointer.<br>
+ *      Note that the method may not detect all possible corruption but if it fails then for sure
+ *      you have a memory corruption somewhere.
+ *
+ * Return FALSE if the test integrity failed (some logs are generated)
+ */
+bool MEM_checkIntegrity();
 /**
  *  \brief
  *      Show memory dump
@@ -230,7 +241,7 @@ void MEM_dump(void);
  *
  * Sets the first num bytes of the block of memory pointed by to with the specified value.
  */
-void memset(void *to, u8 value, u16 len);
+void memset(void* to, u8 value, u16 len);
 #endif  // ENABLE_NEWLIB
 
 /**
@@ -246,7 +257,7 @@ void memset(void *to, u8 value, u16 len);
  *
  * Sets the first num shorts of the block of memory pointed by to with the specified value.
  */
-void memsetU16(u16 *to, u16 value, u16 len);
+void memsetU16(u16* to, u16 value, u16 len);
 /**
  *  \brief
  *      Fill block of memory (optimized for u32)
@@ -260,7 +271,7 @@ void memsetU16(u16 *to, u16 value, u16 len);
  *
  * Sets the first num longs of the block of memory pointed by to with the specified value.
  */
-void memsetU32(u32 *to, u32 value, u16 len);
+void memsetU32(u32* to, u32 value, u16 len);
 
 #if (ENABLE_NEWLIB == 0)
 /**
@@ -275,9 +286,27 @@ void memsetU32(u32 *to, u32 value, u16 len);
  *      Number of bytes to copy.
  *
  * Copies the values of len long from the location pointed by from directly to the memory block pointed by to.
- * The underlying type of the objects pointed by both the source and destination pointers are irrelevant for this function; The result is a binary copy of the data.
+ * The underlying type of the objects pointed by both the source and destination pointers are irrelevant for this function
+ * as the result is a binary copy of the data.
  */
-void memcpy(void *to, const void *from, u16 len);
+void memcpy(void* to, const void* from, u16 len);
+
+/**
+ *  \brief
+ *      Compare 2 blocks of memory
+ *
+ *  \param pointer1
+ *      Pointer of the first block of memory
+ *  \param pointer2
+ *      Pointer of the second block of memory
+ *  \param len
+ *      Number of bytes to compare.
+ *
+ * Compares the first <i>len</i> bytes of the memory blocks pointed to by <i>pointer1</i> and <i>pointer2</i>. The comparison is done lexicographically.
+ * The sign of the result is the sign of the difference between the values of the first pair of bytes (both interpreted as unsigned char)
+ * that differ in the objects being compared. 
+ */
+s8 memcmp(const void* pointer1, const void* pointer2, size_t len);
 #endif  // ENABLE_NEWLIB
 
 /**

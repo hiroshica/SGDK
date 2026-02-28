@@ -50,6 +50,7 @@
 #define STATE_ANIMATION_DONE                0x0010
 
 
+
 // shared from vdp_spr.c unit
 extern void logVDPSprite(u16 index);
 // shared from vdp.c unit
@@ -90,6 +91,7 @@ u16 spriteVramSize;
 
 #ifdef SPR_PROFIL
 
+
 #define PROFIL_ALLOCATE_SPRITE          0
 #define PROFIL_RELEASE_SPRITE           1
 #define PROFIL_ADD_SPRITE               2
@@ -97,7 +99,7 @@ u16 spriteVramSize;
 #define PROFIL_SET_DEF                  4
 #define PROFIL_SET_ATTRIBUTE            5
 #define PROFIL_SET_ANIM_FRAME           6
-#define PROFIL_SET_VRAM_OR_SPRIND       7
+#define PROFIL_SET_VRAM_IND             7
 #define PROFIL_SET_VISIBILITY           8
 #define PROFIL_CLEAR                    9
 #define PROFIL_UPDATE                   10
@@ -115,7 +117,7 @@ static u32 profil_time[20];
 #endif
 
 
-void NO_INLINE SPR_initEx(u16 vramSize)
+NO_INLINE void SPR_initEx(u16 vramSize)
 {
     u16 index;
     u16 size;
@@ -155,7 +157,7 @@ void SPR_init()
     SPR_initEx(420);
 }
 
-void NO_INLINE SPR_end()
+NO_INLINE void SPR_end()
 {
     if (SPR_isInitialized())
     {
@@ -399,6 +401,9 @@ Sprite* NO_INLINE SPR_addSpriteEx(const SpriteDefinition* spriteDef, s16 x, s16 
     sprite->frameInd = -1;
 //    sprite->seqInd = -1;
 
+    // may not be reset in SPR_setAnimAndFrame(..) so we have to reset it here
+    sprite->timer = 0;
+
     sprite->x = x + 0x80;
     sprite->y = y + 0x80;
     // depending sprite position (first or last) we set its default depth
@@ -534,7 +539,7 @@ void SPR_disableVDPSpriteChecking()
     usedVDPSprite &= ~CHECK_VDP_SPRITE;
 }
 
-void NO_INLINE SPR_defragVRAM()
+NO_INLINE void SPR_defragVRAM()
 {
     START_PROFIL
 
@@ -581,47 +586,81 @@ void NO_INLINE SPR_defragVRAM()
     END_PROFIL(PROFIL_VRAM_DEFRAG)
 }
 
-u16** NO_INLINE SPR_loadAllFrames(const SpriteDefinition* sprDef, u16 index, u16* totalNumTile)
+typedef struct
 {
-    u16 numFrameTot = 0;
-    u16 numTileTot = 0;
+    const TileSet* tileSet;
+    u16 index;
+} TileSetIndex;
+
+static u16 getTilesetIndex(TileSetIndex* tilesetIndexes, const TileSet* tileset, u16 index)
+{
+    TileSetIndex* ti = tilesetIndexes;
+
+    // try fo find if tileset already exist
+    while(ti->tileSet)
+    {
+        // find the tileset, return its index
+        if (ti->tileSet == tileset) return ti->index;
+        // next
+        ti++;
+    }
+
+    // set new tileset index
+    ti->tileSet = tileset;
+    ti->index = index;
+
+    return index;
+}
+
+FORCE_INLINE u16** SPR_loadAllFrames(const SpriteDefinition* sprDef, u16 index, u16* totalNumTile)
+{
+    return SPR_loadAllFramesEx(sprDef, index, totalNumTile, DMA);
+}
+
+NO_INLINE u16** SPR_loadAllFramesEx(const SpriteDefinition* sprDef, u16 index, u16* totalNumTile, TransferMethod tm)
+{
+    // count total number of frames
     Animation** anim = sprDef->animations;
     const u16 numAnimation = sprDef->numAnimation;
+    u16 numFrameTot = 0;
 
     for(u16 indAnim = 0; indAnim < numAnimation; indAnim++)
     {
-        AnimationFrame** frame = (*anim)->frames;
-        const u16 numFrame = (*anim)->numFrame;
-
-        for(u16 indFrame = 0; indFrame < numFrame; indFrame++)
-        {
-            numTileTot += (*frame)->tileset->numTile;
-            frame++;
-        }
-
-        numFrameTot += numFrame;
+        numFrameTot += (*anim)->numFrame;
         anim++;
     }
 
-    // store total num tile if needed
-    if (totalNumTile) *totalNumTile = numTileTot;
-
     // allocate result table indexes[numAnim][numFrame]
     u16** indexes = MEM_alloc((numAnimation * sizeof(u16*)) + (numFrameTot * sizeof(u16)));
-    // store pointer
-    u16** result = indexes;
+    // used to detect duplicate tilesets
+    TileSetIndex* tilesetIndexes = MEM_alloc(numFrameTot * sizeof(TileSetIndex));
+
+    // not enough memory
+    if ((indexes == NULL) || (tilesetIndexes == NULL))
+    {
+        if (totalNumTile) *totalNumTile = 0;
+        if (tilesetIndexes) MEM_free(tilesetIndexes);
+        if (indexes) MEM_free(indexes);
+
+        return NULL;
+    }
+
+    // clear tilesetIndexes table
+    memset(tilesetIndexes, 0, numFrameTot * sizeof(TileSetIndex));
+
+    // frame indexes pointer for current animation
+    u16** animFrameIndexes = indexes;
     // init frames indexes pointer
-    u16* indFrames = (u16*) (indexes + numAnimation);
+    u16* frameIndexes = (u16*) (indexes + numAnimation);
 
     // start index
     u16 tileInd = index;
-
     anim = sprDef->animations;
 
     for(u16 indAnim = 0; indAnim < numAnimation; indAnim++)
     {
         // store frames indexes pointer for this animation
-        *indexes++ = indFrames;
+        *animFrameIndexes++ = frameIndexes;
 
         AnimationFrame** frame = (*anim)->frames;
         const u16 numFrame = (*anim)->numFrame;
@@ -629,25 +668,157 @@ u16** NO_INLINE SPR_loadAllFrames(const SpriteDefinition* sprDef, u16 index, u16
         for(u16 indFrame = 0; indFrame < numFrame; indFrame++)
         {
             const TileSet* tileset = (*frame)->tileset;
+            const u16 ind = getTilesetIndex(tilesetIndexes, tileset, tileInd);
 
-            // load tileset
-            VDP_loadTileSet(tileset, tileInd, DMA);
+            // new tileset ?
+            if (ind == tileInd)
+            {
+                // load it to VRAM
+                VDP_loadTileSet(tileset, tileInd, tm);
+                // next tileset
+                tileInd += tileset->numTile;
+            }
+
             // store frame tile index
-            *indFrames++ = tileInd;
-            // next tileset
-            tileInd += tileset->numTile;
+            *frameIndexes++ = ind;
             // next frame
             frame++;
         }
 
+        // next animation
         anim++;
     }
 
-    return result;
+    // store total number of used tiles (discarding duplicated tilesets)
+    if (totalNumTile) *totalNumTile = (tileInd - index);
+
+    MEM_free(tilesetIndexes);
+
+    return indexes;
+}
+
+NO_INLINE u16** SPR_loadAllIndexes(const SpriteDefinition* sprDef, u16 index, u16* totalNumTile)
+{
+    // count total number of frames
+    Animation** anim = sprDef->animations;
+    const u16 numAnimation = sprDef->numAnimation;
+    u16 numFrameTot = 0;
+
+    for(u16 indAnim = 0; indAnim < numAnimation; indAnim++)
+    {
+        numFrameTot += (*anim)->numFrame;
+        anim++;
+    }
+
+    // allocate result table indexes[numAnim][numFrame]
+    u16** indexes = MEM_alloc((numAnimation * sizeof(u16*)) + (numFrameTot * sizeof(u16)));
+    // used to detect duplicate tilesets
+    TileSetIndex* tilesetIndexes = MEM_alloc(numFrameTot * sizeof(TileSetIndex));
+
+    // not enough memory
+    if ((indexes == NULL) || (tilesetIndexes == NULL))
+    {
+        if (totalNumTile) *totalNumTile = 0;
+        if (tilesetIndexes) MEM_free(tilesetIndexes);
+        if (indexes) MEM_free(indexes);
+
+        return NULL;
+    }
+
+    // clear tilesetIndexes table
+    memset(tilesetIndexes, 0, numFrameTot * sizeof(TileSetIndex));
+
+    // frame indexes pointer for current animation
+    u16** animFrameIndexes = indexes;
+    // init frames indexes pointer
+    u16* frameIndexes = (u16*) (indexes + numAnimation);
+
+    // start index
+    u16 tileInd = index;
+    anim = sprDef->animations;
+
+    for(u16 indAnim = 0; indAnim < numAnimation; indAnim++)
+    {
+        // store frames indexes pointer for this animation
+        *animFrameIndexes++ = frameIndexes;
+
+        AnimationFrame** frame = (*anim)->frames;
+        const u16 numFrame = (*anim)->numFrame;
+
+        for(u16 indFrame = 0; indFrame < numFrame; indFrame++)
+        {
+            const TileSet* tileset = (*frame)->tileset;
+            const u16 ind = getTilesetIndex(tilesetIndexes, tileset, tileInd);
+
+            // new tileset ?
+            if (ind == tileInd)
+            {
+                // count tile and pas to next tileset
+                tileInd += tileset->numTile;
+            }
+            // store frame tile index
+            *frameIndexes++ = ind;
+            // next frame
+            frame++;
+        }
+
+        // next animation
+        anim++;
+    }
+
+    // store total number of used tiles (discarding duplicated tilesets)
+    if (totalNumTile) *totalNumTile = (tileInd - index);
+
+    MEM_free(tilesetIndexes);
+
+    return indexes;
+}
+
+NO_INLINE u16 SPR_loadAllTiles(const SpriteDefinition* sprDef, u16 index, u16** indexes, const TransferMethod tm)
+{
+    Animation** anim = sprDef->animations;
+    const u16 numAnimation = sprDef->numAnimation;    
+    // frame indexes pointer for current animation
+    u16** animFrameIndexes = indexes;
+    // start index
+    u16 tileInd = index;
+
+    for(u16 indAnim = 0; indAnim < numAnimation; indAnim++)
+    {        
+        // get the frame indexes for this animation
+        u16* frameIndexes = *animFrameIndexes++;
+
+        AnimationFrame** frame = (*anim)->frames;
+        const u16 numFrame = (*anim)->numFrame;
+        
+        for(u16 indFrame = 0; indFrame < numFrame; indFrame++)
+        {            
+            const u16 ind = *frameIndexes++;
+
+            // new tileset ? (otherwise we will find a previous index)
+            if (ind == tileInd)
+            {
+                const TileSet* tileset = (*frame)->tileset;
+                // load it to VRAM
+                VDP_loadTileSet(tileset, tileInd, tm);
+                // next tileset
+                tileInd += tileset->numTile;
+            }
+
+            // next frame
+            frame++;
+        }
+
+        // next animation
+        anim++;
+    }
+
+    // returns the number of tiles loaded
+    return tileInd - index;
 }
 
 
-bool NO_INLINE SPR_setDefinition(Sprite* sprite, const SpriteDefinition* spriteDef)
+NO_INLINE bool SPR_setDefinition(Sprite* sprite, const SpriteDefinition* spriteDef)
 {
     START_PROFIL
 
@@ -1004,7 +1175,7 @@ void SPR_setAnimAndFrame(Sprite* sprite, s16 anim, s16 frame)
         KLog_U3("SPR_setAnimAndFrame: #", getSpriteIndex(sprite), " anim=", anim, " frame=", frame);
 #endif // SPR_DEBUG
 
-        sprite->status = (sprite->status & ~STATE_ANIMATION_DONE) | NEED_FRAME_UPDATE;
+        sprite->status |= NEED_FRAME_UPDATE;
     }
 
     END_PROFIL(PROFIL_SET_ANIM_FRAME)
@@ -1040,7 +1211,7 @@ void SPR_setAnim(Sprite* sprite, s16 anim)
         KLog_U2_("SPR_setAnim: #", getSpriteIndex(sprite), " anim=", anim, " frame=0");
 #endif // SPR_DEBUG
 
-        sprite->status = (sprite->status & ~STATE_ANIMATION_DONE) | NEED_FRAME_UPDATE;
+        sprite->status |= NEED_FRAME_UPDATE;
     }
 
     END_PROFIL(PROFIL_SET_ANIM_FRAME)
@@ -1091,19 +1262,9 @@ void SPR_nextFrame(Sprite* sprite)
 
     if (frameInd >= anim->numFrame)
     {
-        // animation done marker
-        sprite->status |= STATE_ANIMATION_DONE;
-
         // no loop ?
         if (sprite->status & SPR_FLAG_DISABLE_ANIMATION_LOOP)
         {
-            // prevent further animation
-            SPR_setAutoAnimation(sprite, FALSE);
-
-            // frame change event handler defined ? --> call it now so we let user now about STATE_ANIMATION_DONE
-            if (sprite->onFrameChange)
-                sprite->onFrameChange(sprite);
-
             // can quit now
             END_PROFIL(PROFIL_SET_ANIM_FRAME)
             return;
@@ -1111,6 +1272,8 @@ void SPR_nextFrame(Sprite* sprite)
 
         // loop
         frameInd = anim->loop;
+        // set animation done state (allows SPR_isAnimationDone(..) to correctly report state when called from frame change callback)
+        sprite->status |= STATE_ANIMATION_DONE;
     }
 
     // set new frame
@@ -1121,24 +1284,32 @@ void SPR_nextFrame(Sprite* sprite)
 
 void SPR_setAutoAnimation(Sprite* sprite, bool value)
 {
+    // for debug
+    checkSpriteValid(sprite, "SPR_setAutoAnimation");
+
     if (value)
     {
-        // disabled ? --> reset timer to current frame timer
+        // currently disabled ? --> reset timer to current frame timer
         if (sprite->timer == -1)
             sprite->timer = sprite->frame->timer;
     }
     else
     {
-        // enabled ? --> disable it
-        if (sprite->timer != -1)
-            sprite->timer = -1;
+        // disable it
+        sprite->timer = -1;
     }
+
+#ifdef SPR_DEBUG
+    KLog_U2("SPR_setAutoAnimation: #", getSpriteIndex(sprite), " AutoAnimation=", value);
+#endif // SPR_DEBUG
 }
 
 bool SPR_getAutoAnimation(Sprite* sprite)
 {
-    return (sprite->timer != -1)?TRUE:FALSE;
+    // for debug
+    checkSpriteValid(sprite, "SPR_getAutoAnimation");
 
+    return (sprite->timer == -1)?FALSE:TRUE;
 }
 
 void SPR_setAnimationLoop(Sprite* sprite, bool value)
@@ -1148,15 +1319,21 @@ void SPR_setAnimationLoop(Sprite* sprite, bool value)
 
     if (value) sprite->status &= ~SPR_FLAG_DISABLE_ANIMATION_LOOP;
     else sprite->status |= SPR_FLAG_DISABLE_ANIMATION_LOOP;
+
+#ifdef SPR_DEBUG
+    KLog_U2("SPR_setAnimationLoop: #", getSpriteIndex(sprite), " loop=", value);
+#endif // SPR_DEBUG
 }
 
-
-bool SPR_getAnimationDone(Sprite* sprite)
+bool SPR_isAnimationDone(Sprite* sprite)
 {
     // for debug
-    checkSpriteValid(sprite, "SPR_getAnimationDone");
+    checkSpriteValid(sprite, "SPR_isAnimationDone");
 
-    return (sprite->status & STATE_ANIMATION_DONE)?TRUE:FALSE;
+    // when we are in the frame change callback we need to test for the 'animation done state'
+    return (sprite->status & STATE_ANIMATION_DONE) ||
+            // otherwise we just check if we are on last frame tick (if auto animation is disabled then only test for last frame)
+           ((sprite->frameInd == (sprite->animation->numFrame - 1)) && ((sprite->timer == 1) || (sprite->timer == -1)));
 }
 
 bool SPR_setVRAMTileIndex(Sprite* sprite, s16 value)
@@ -1190,7 +1367,7 @@ bool SPR_setVRAMTileIndex(Sprite* sprite, s16 value)
         // nothing to do --> just return TRUE
         else
         {
-            END_PROFIL(PROFIL_SET_VRAM_OR_SPRIND)
+            END_PROFIL(PROFIL_SET_VRAM_IND)
 
             return TRUE;
         }
@@ -1216,7 +1393,7 @@ bool SPR_setVRAMTileIndex(Sprite* sprite, s16 value)
                 // save status and return FALSE
                 sprite->status = status;
 
-                END_PROFIL(PROFIL_SET_VRAM_OR_SPRIND)
+                END_PROFIL(PROFIL_SET_VRAM_IND)
 
                 return FALSE;
             }
@@ -1237,7 +1414,7 @@ bool SPR_setVRAMTileIndex(Sprite* sprite, s16 value)
     // save status
     sprite->status = status;
 
-    END_PROFIL(PROFIL_SET_VRAM_OR_SPRIND)
+    END_PROFIL(PROFIL_SET_VRAM_IND)
 
     return TRUE;
 }
@@ -1282,7 +1459,7 @@ SpriteVisibility SPR_getVisibility(Sprite* sprite)
     else return HIDDEN;
 }
 
-bool NO_INLINE SPR_isVisible(Sprite* sprite, bool recompute)
+NO_INLINE bool SPR_isVisible(Sprite* sprite, bool recompute)
 {
     // for debug
     checkSpriteValid(sprite, "SPR_isVisible");
@@ -1390,7 +1567,7 @@ void SPR_clear()
     END_PROFIL(PROFIL_CLEAR)
 }
 
-void NO_INLINE SPR_update()
+NO_INLINE void SPR_update()
 {
     START_PROFIL
 
@@ -1445,6 +1622,7 @@ void NO_INLINE SPR_update()
         if (status & NEED_VISIBILITY_UPDATE)
             status = updateVisibility(sprite, status);
 
+<<<<<<< HEAD
         // sprite can have been released during updateFrame(..) using the frame change callback
         // so we have to take care of that
         u16 visibility = (status & ALLOCATED)?sprite->visibility:0;
@@ -1462,6 +1640,11 @@ void NO_INLINE SPR_update()
                 0xFFFF
             };
 
+=======
+        // sprite visible and still allocated (can be released during updateFrame(..) with the frame change callback) with enough entry in SAT ?
+        if (sprite->visibility && (status & ALLOCATED) && (vdpSpriteInd <= SAT_MAX_SIZE))
+        {
+>>>>>>> cb114acadc454440fcddd616d9a7dd5a693b1b13
             if (status & NEED_TILES_UPLOAD)
             {
                 loadTiles(sprite);
@@ -1469,6 +1652,7 @@ void NO_INLINE SPR_update()
                 status &= ~NEED_TILES_UPLOAD;
             }
 
+<<<<<<< HEAD
             //kprintf("SPR_update: visibility=%04x",visibility);
             // spr_mode select function
             if(sprite->spr_mode == SPR_NONE)
@@ -1515,12 +1699,53 @@ void NO_INLINE SPR_update()
                         {
                             // current sprite visibility bit is in high bit
                             if (visibility & 0x8000)
+=======
+            // update SAT now
+            AnimationFrame* frame = sprite->frame;
+            FrameVDPSprite* frameSprite = frame->frameVDPSprites;
+            u16 attr = sprite->attribut;
+            s8 numSprite = frame->numSprite;
+
+            // special case of single VDP sprite with size aligned to sprite size (no offset, no flip calculation required)
+            if (numSprite < 0)
+            {
+                vdpSprite->y = sprite->y;
+                vdpSprite->size = frameSprite->size;
+                vdpSprite->link = vdpSpriteInd++;
+                vdpSprite->attribut = attr;
+                vdpSprite->x = sprite->x;
+                vdpSprite++;
+            }
+            else
+            {
+                static const u16 visibilityMask[17] =
+                {
+                    0x0000, 0x8000, 0xC000, 0xE000, 0xF000, 0xF800, 0xFC00, 0xFE00,
+                    0xFF00, 0xFF80, 0xFFC0, 0xFFE0, 0xFFF0, 0xFFF8, 0xFFFC, 0xFFFE,
+                    0xFFFF
+                };
+
+                // so visibility also allow to get the number of sprite
+                s16 visibility = (s16)(sprite->visibility & visibilityMask[(u8) numSprite]);
+
+                switch(attr & (TILE_ATTR_VFLIP_MASK | TILE_ATTR_HFLIP_MASK))
+                {
+                    case 0:
+                        while(visibility)
+                        {
+                            // current sprite visibility bit is in high bit
+                            if (visibility < 0)
+>>>>>>> cb114acadc454440fcddd616d9a7dd5a693b1b13
                             {
                                 vdpSprite->y = sprite->y + frameSprite->offsetY;
                                 vdpSprite->size = frameSprite->size;
                                 vdpSprite->link = vdpSpriteInd++;
                                 vdpSprite->attribut = attr;
+<<<<<<< HEAD
                                 vdpSprite->x = sprite->x + frameSprite->offsetXFlip;
+=======
+                                vdpSprite->x = sprite->x + frameSprite->offsetX;
+>>>>>>> cb114acadc454440fcddd616d9a7dd5a693b1b13
                                 vdpSprite++;
                             }
 
@@ -1531,6 +1756,7 @@ void NO_INLINE SPR_update()
                             // next VDP sprite
                             visibility <<= 1;
 
+<<<<<<< HEAD
     #ifdef SPR_DEBUG
                             logVDPSprite(vdpSpriteInd - 1);
     #endif // SPR_DEBUG
@@ -1549,6 +1775,25 @@ void NO_INLINE SPR_update()
                                 vdpSprite->link = vdpSpriteInd++;
                                 vdpSprite->attribut = attr;
                                 vdpSprite->x = sprite->x + frameSprite->offsetX;
+=======
+#ifdef SPR_DEBUG
+                            logVDPSprite(vdpSpriteInd - 1);
+#endif // SPR_DEBUG
+                        }
+                        break;
+
+                    case TILE_ATTR_HFLIP_MASK:
+                        while(visibility)
+                        {
+                            // current sprite visibility bit is in high bit
+                            if (visibility < 0)
+                            {
+                                vdpSprite->y = sprite->y + frameSprite->offsetY;
+                                vdpSprite->size = frameSprite->size;
+                                vdpSprite->link = vdpSpriteInd++;
+                                vdpSprite->attribut = attr;
+                                vdpSprite->x = sprite->x + frameSprite->offsetXFlip;
+>>>>>>> cb114acadc454440fcddd616d9a7dd5a693b1b13
                                 vdpSprite++;
                             }
 
@@ -1559,6 +1804,7 @@ void NO_INLINE SPR_update()
                             // next VDP sprite
                             visibility <<= 1;
 
+<<<<<<< HEAD
     #ifdef SPR_DEBUG
                             logVDPSprite(vdpSpriteInd - 1);
     #endif // SPR_DEBUG
@@ -1570,12 +1816,29 @@ void NO_INLINE SPR_update()
                         {
                             // current sprite visibility bit is in high bit
                             if (visibility & 0x8000)
+=======
+#ifdef SPR_DEBUG
+                            logVDPSprite(vdpSpriteInd - 1);
+#endif // SPR_DEBUG
+                        }
+                        break;
+
+                    case TILE_ATTR_VFLIP_MASK:
+                        while(visibility)
+                        {
+                            // current sprite visibility bit is in high bit
+                            if (visibility < 0)
+>>>>>>> cb114acadc454440fcddd616d9a7dd5a693b1b13
                             {
                                 vdpSprite->y = sprite->y + frameSprite->offsetYFlip;
                                 vdpSprite->size = frameSprite->size;
                                 vdpSprite->link = vdpSpriteInd++;
                                 vdpSprite->attribut = attr;
+<<<<<<< HEAD
                                 vdpSprite->x = sprite->x + frameSprite->offsetXFlip;
+=======
+                                vdpSprite->x = sprite->x + frameSprite->offsetX;
+>>>>>>> cb114acadc454440fcddd616d9a7dd5a693b1b13
                                 vdpSprite++;
                             }
 
@@ -1586,6 +1849,7 @@ void NO_INLINE SPR_update()
                             // next VDP sprite
                             visibility <<= 1;
 
+<<<<<<< HEAD
     #ifdef SPR_DEBUG
                             logVDPSprite(vdpSpriteInd - 1);
     #endif // SPR_DEBUG
@@ -1630,6 +1894,41 @@ void NO_INLINE SPR_update()
                     nums--;
                 }
 
+=======
+#ifdef SPR_DEBUG
+                            logVDPSprite(vdpSpriteInd - 1);
+#endif // SPR_DEBUG
+                        }
+                        break;
+
+                    case (TILE_ATTR_VFLIP_MASK | TILE_ATTR_HFLIP_MASK):
+                        while(visibility)
+                        {
+                            // current sprite visibility bit is in high bit
+                            if (visibility < 0)
+                            {
+                                vdpSprite->y = sprite->y + frameSprite->offsetYFlip;
+                                vdpSprite->size = frameSprite->size;
+                                vdpSprite->link = vdpSpriteInd++;
+                                vdpSprite->attribut = attr;
+                                vdpSprite->x = sprite->x + frameSprite->offsetXFlip;
+                                vdpSprite++;
+                            }
+
+                            // increment tile index in attribut field
+                            attr += frameSprite->numTile;
+                            // next
+                            frameSprite++;
+                            // next VDP sprite
+                            visibility <<= 1;
+
+#ifdef SPR_DEBUG
+                            logVDPSprite(vdpSpriteInd - 1);
+#endif // SPR_DEBUG
+                        }
+                        break;
+                }
+>>>>>>> cb114acadc454440fcddd616d9a7dd5a693b1b13
             }
         }
 
@@ -1679,7 +1978,7 @@ void SPR_logProfil()
     KLog_U2x(4, "Alloc=", profil_time[PROFIL_ALLOCATE_SPRITE], " Release=", profil_time[PROFIL_RELEASE_SPRITE]);
     KLog_U2x(4, "Add=", profil_time[PROFIL_ADD_SPRITE], " Remove=", profil_time[PROFIL_REMOVE_SPRITE]);
     KLog_U2x(4, "Set Def.=", profil_time[PROFIL_SET_DEF], " Set Attr.=", profil_time[PROFIL_SET_ATTRIBUTE]);
-    KLog_U2x(4, "Set Anim & Frame=", profil_time[PROFIL_SET_ANIM_FRAME], " Set VRAM & Sprite Ind=", profil_time[PROFIL_SET_VRAM_OR_SPRIND]);
+    KLog_U2x(4, "Set Anim & Frame=", profil_time[PROFIL_SET_ANIM_FRAME], " Set VRAM Ind=", profil_time[PROFIL_SET_VRAM_IND]);
     KLog_U2x(4, "Set Visibility=", profil_time[PROFIL_SET_VISIBILITY], "  Clear=", profil_time[PROFIL_CLEAR]);
     KLog_U1x(4, "Sort Sprite list=", profil_time[PROFIL_SORT]);
     KLog_U1x_(4, " Update all=", profil_time[PROFIL_UPDATE], " -------------");
@@ -1712,6 +2011,7 @@ static u16 updateVisibility(Sprite* sprite, u16 status)
     u16 visibility;
     const SpriteDefinition* sprDef = sprite->definition;
 
+    // we use 'unsigned' on purpose here to get merged <0 test
     const u16 sw = screenWidth;
     const u16 sh = screenHeight;
     const u16 w = sprDef->w - 1;
@@ -1722,7 +2022,7 @@ static u16 updateVisibility(Sprite* sprite, u16 status)
     // fast visibility computation ?
     if (status & SPR_FLAG_FAST_AUTO_VISIBILITY)
     {
-        // compute global visibility for sprite (use unsigned for merged <0 test)
+        // compute global visibility for sprite ('unsigned' allow merged <0 test)
         if (((u16)(x + w) < (u16)(sw + w)) && ((u16)(y + h) < (u16)(sh + h)))
             visibility = VISIBILITY_ON;
         else
@@ -1741,7 +2041,7 @@ static u16 updateVisibility(Sprite* sprite, u16 status)
         KLog_S2("    xmin=", xmin, " xmax=", xmax);
 #endif // SPR_DEBUG
 
-        // sprite is fully visible ? --> set all sprite visible (use unsigned for merged <0 test)
+        // sprite is fully visible ? --> set all sprite visible ('unsigned' allow merged <0 test)
         if ((x < (u16)(sw - w)) && (y < (u16)(sh - h)))
         {
             visibility = VISIBILITY_ON;
@@ -1749,11 +2049,11 @@ static u16 updateVisibility(Sprite* sprite, u16 status)
 #ifdef SPR_DEBUG
             KLog_S2("  updateVisibility (slow): global x=", x, " y=", y);
             KLog_S2("    frame w=", sprDef->w, " h=", sprDef->h);
-            KLog_S4("    x=", x, " y=", y, " sw-w=", (u16)(sw-w), " sh-h=", (u16)(sh-h));
+            KLog_S4("    x=", x, " y=", y, " sw-w=", (u16)(sw - w), " sh-h=", (u16)(sh - h));
             KLog("    full ON");
 #endif // SPR_DEBUG
         }
-        // sprite is fully hidden ? --> set all sprite to hidden (use unsigned for merged <0 test)
+        // sprite is fully hidden ? --> set all sprite to hidden ('unsigned' allow merged <0 test)
         else if (((u16)(x + w) >= (u16)(sw + w)) || ((u16)(y + h) >= (u16)(sh + h)))
         {
             visibility = VISIBILITY_OFF;
@@ -1761,7 +2061,7 @@ static u16 updateVisibility(Sprite* sprite, u16 status)
 #ifdef SPR_DEBUG
             KLog_S2("  updateVisibility (slow): global x=", x, " y=", y);
             KLog_S2("    frame w=", sprDef->w, " h=", sprDef->h);
-            KLog_S4("    x+w=", (u16)(x+w), " y+h=", (u16)(y+h), " sw+w=", (u16)(sw+w), " sh+h=", (u16)(sh+h));
+            KLog_S4("    x+w=", (u16)(x + w), " y+h=", (u16)(y + h), " sw+w=", (u16)(sw + w), " sh+h=", (u16)(sh + h));
             KLog("    full OFF");
 #endif // SPR_DEBUG
         }
@@ -1773,98 +2073,104 @@ static u16 updateVisibility(Sprite* sprite, u16 status)
             const u16 my = sh + 0x1F;
 
             AnimationFrame* frame = sprite->frame;
-            u16 num = frame->numSprite;
-            FrameVDPSprite* frameSprite = frame->frameVDPSprites;
-            visibility = 0;
+            s8 num = frame->numSprite;
 
-#ifdef SPR_DEBUG
-            KLog_S2("  updateVisibility (slow): global x=", x, " y=", y);
-            KLog("    partial");
-            KLog_S2("    frame w=", sprDef->w, " h=", sprDef->h);
-            KLog_S4("    bx=", bx, " by=", by, " mx=", mx, " my=", my);
-#endif
-
-            switch(sprite->attribut & (TILE_ATTR_HFLIP_MASK | TILE_ATTR_VFLIP_MASK))
+            // special case of single VDP sprite with size aligned to sprite size (no offset, no flip calculation required)
+            if (num < 0) visibility = ((bx < mx) && (by < my))?0x8000:0;
+            else
             {
-                case 0:
-                    while(num--)
-                    {
-                        // need to be done first
-                        visibility <<= 1;
-
-                        // compute visibility (use unsigned for merged <0 test)
-                        if (((u16)(frameSprite->offsetX + bx) < mx) && ((u16)(frameSprite->offsetY + by) < my))
-                            visibility |= 1;
+                FrameVDPSprite* frameSprite = frame->frameVDPSprites;
+                visibility = 0;
 
 #ifdef SPR_DEBUG
-                        KLog_S4("    offx+bx=", (u16)(frameSprite->offsetX + bx), " offy+by=", (u16)(frameSprite->offsetY + by), " mx=", mx, " my=", my);
+                KLog_S2("  updateVisibility (slow): global x=", x, " y=", y);
+                KLog("    partial");
+                KLog_S2("    frame w=", sprDef->w, " h=", sprDef->h);
+                KLog_S4("    bx=", bx, " by=", by, " mx=", mx, " my=", my);
 #endif
 
-                        // next
-                        frameSprite++;
-                    }
-                    break;
+                switch(sprite->attribut & (TILE_ATTR_HFLIP_MASK | TILE_ATTR_VFLIP_MASK))
+                {
+                    case 0:
+                        while(num--)
+                        {
+                            // need to be done first
+                            visibility <<= 1;
 
-                case TILE_ATTR_HFLIP_MASK:
-                    while(num--)
-                    {
-                        // need to be done first
-                        visibility <<= 1;
-
-                        // compute visibility (use unsigned for merged <0 test)
-                        if (((u16)(frameSprite->offsetXFlip + bx) < mx) && ((u16)(frameSprite->offsetY + by) < my))
-                            visibility |= 1;
+                            // compute visibility ('unsigned' allow merged <0 test)
+                            if (((u16)(frameSprite->offsetX + bx) < mx) && ((u16)(frameSprite->offsetY + by) < my))
+                                visibility |= 1;
 
 #ifdef SPR_DEBUG
-                        KLog_S4("    offx+bx=", (u16)(frameSprite->offsetXFlip + bx), " offy+by=", (u16)(frameSprite->offsetY + by), " mx=", mx, " my=", my);
+                            KLog_S4("    offx+bx=", (u16)(frameSprite->offsetX + bx), " offy+by=", (u16)(frameSprite->offsetY + by), " mx=", mx, " my=", my);
 #endif
 
-                        // next
-                        frameSprite++;
-                    }
-                    break;
+                            // next
+                            frameSprite++;
+                        }
+                        break;
 
-                case TILE_ATTR_VFLIP_MASK:
-                    while(num--)
-                    {
-                        // need to be done first
-                        visibility <<= 1;
+                    case TILE_ATTR_HFLIP_MASK:
+                        while(num--)
+                        {
+                            // need to be done first
+                            visibility <<= 1;
 
-                        // compute visibility (use unsigned for merged <0 test)
-                        if (((u16)(frameSprite->offsetX + bx) < mx) && ((u16)(frameSprite->offsetYFlip + by) < my))
-                            visibility |= 1;
+                            // compute visibility ('unsigned' allow merged <0 test)
+                            if (((u16)(frameSprite->offsetXFlip + bx) < mx) && ((u16)(frameSprite->offsetY + by) < my))
+                                visibility |= 1;
 
 #ifdef SPR_DEBUG
-                        KLog_S4("    offx+bx=", (u16)(frameSprite->offsetXFlip + bx), " offy+by=", (u16)(frameSprite->offsetYFlip + by), " mx=", mx, " my=", my);
+                            KLog_S4("    offx+bx=", (u16)(frameSprite->offsetXFlip + bx), " offy+by=", (u16)(frameSprite->offsetY + by), " mx=", mx, " my=", my);
 #endif
 
-                        // next
-                        frameSprite++;
-                    }
-                    break;
+                            // next
+                            frameSprite++;
+                        }
+                        break;
 
-                case TILE_ATTR_HFLIP_MASK | TILE_ATTR_VFLIP_MASK:
-                    while(num--)
-                    {
-                        // need to be done first
-                        visibility <<= 1;
+                    case TILE_ATTR_VFLIP_MASK:
+                        while(num--)
+                        {
+                            // need to be done first
+                            visibility <<= 1;
 
-                        // compute visibility (use unsigned for merged <0 test)
-                        if (((u16)(frameSprite->offsetXFlip + bx) < mx) && ((u16)(frameSprite->offsetYFlip + by) < my))
-                            visibility |= 1;
+                            // compute visibility ('unsigned' allow merged <0 test)
+                            if (((u16)(frameSprite->offsetX + bx) < mx) && ((u16)(frameSprite->offsetYFlip + by) < my))
+                                visibility |= 1;
 
 #ifdef SPR_DEBUG
-                        KLog_S4("    offx+bx=", (u16)(frameSprite->offsetXFlip + bx), " offy+by=", (u16)(frameSprite->offsetYFlip + by), " mx=", mx, " my=", my);
+                            KLog_S4("    offx+bx=", (u16)(frameSprite->offsetXFlip + bx), " offy+by=", (u16)(frameSprite->offsetYFlip + by), " mx=", mx, " my=", my);
 #endif
 
-                        // next
-                        frameSprite++;
-                    }
-                    break;
+                            // next
+                            frameSprite++;
+                        }
+                        break;
+
+                    case TILE_ATTR_HFLIP_MASK | TILE_ATTR_VFLIP_MASK:
+                        while(num--)
+                        {
+                            // need to be done first
+                            visibility <<= 1;
+
+                            // compute visibility ('unsigned' allow merged <0 test)
+                            if (((u16)(frameSprite->offsetXFlip + bx) < mx) && ((u16)(frameSprite->offsetYFlip + by) < my))
+                                visibility |= 1;
+
+#ifdef SPR_DEBUG
+                            KLog_S4("    offx+bx=", (u16)(frameSprite->offsetXFlip + bx), " offy+by=", (u16)(frameSprite->offsetYFlip + by), " mx=", mx, " my=", my);
+#endif
+
+                            // next
+                            frameSprite++;
+                        }
+                        break;
+                }
+
+                // so visibility is in high bits
+                visibility <<= (16 - frame->numSprite);
             }
-
-            // so visibility is in high bits
-            visibility <<= (16 - frame->numSprite);
         }
     }
 
@@ -1920,7 +2226,7 @@ static u16 updateFrame(Sprite* sprite, u16 status)
 
     // set frame
     sprite->frame = frame;
-    // init timer for this frame
+    // init timer for this frame *before* frame change callback so it can modify change it if needed.
     if (SPR_getAutoAnimation(sprite))
         sprite->timer = frame->timer;
 
@@ -1940,88 +2246,13 @@ static u16 updateFrame(Sprite* sprite, u16 status)
     if (status & SPR_FLAG_AUTO_VISIBILITY)
         status |= NEED_VISIBILITY_UPDATE;
 
-    // frame update done
-    status &= ~NEED_FRAME_UPDATE;
+    // frame update done, also clear ANIMATION_DONE state
+    status &= ~(NEED_FRAME_UPDATE | STATE_ANIMATION_DONE);
 
     END_PROFIL(PROFIL_UPDATE_FRAME)
 
     return status;
 }
-
-//static VDPSprite* updateSpriteTable(Sprite* sprite, VDPSprite* vdpSprite)
-//{
-//    START_PROFIL
-//
-//    AnimationFrame* frame;
-//    FrameVDPSprite* frameSprite;
-//    u16 attr;
-//    s16 num;
-//    u16 visibility;
-//    u8 ind;
-//
-//    visibility = sprite->visibility;
-//    attr = sprite->attribut;
-//    frame = sprite->frame;
-//    num = frame->numSprite;
-//    frameSprite = frame->frameVDPSprites;
-//    ind = (vdpSprite - vdpSpriteCache) + 1;
-//
-//    if (visibility == VISIBILITY_ON)
-//    {
-//        while(num--)
-//        {
-//            if (attr & TILE_ATTR_VFLIP_MASK) vdpSprite->y = sprite->y + frameSprite->offsetYFlip;
-//            else vdpSprite->y = sprite->y + frameSprite->offsetY;
-//            vdpSprite->size = frameSprite->size;
-//            vdpSprite->attribut = attr;
-//            if (attr & TILE_ATTR_HFLIP_MASK) vdpSprite->x = sprite->x + frameSprite->offsetXFlip;
-//            else vdpSprite->x = sprite->x + frameSprite->offsetX;
-//            vdpSprite->link = ind++;
-//            vdpSprite++;
-//
-//            // increment tile index in attribut field
-//            attr += frameSprite->numTile;
-//            // next
-//            frameSprite++;
-//
-//#ifdef SPR_DEBUG
-//            logVDPSprite(ind - 1);
-//#endif // SPR_DEBUG
-//        }
-//    }
-//    else
-//    {
-//        while(num--)
-//        {
-//            if (visibility & 1)
-//            {
-//                if (attr & TILE_ATTR_VFLIP_MASK) vdpSprite->y = sprite->y + frameSprite->offsetYFlip;
-//                else vdpSprite->y = sprite->y + frameSprite->offsetY;
-//                if (attr & TILE_ATTR_HFLIP_MASK) vdpSprite->x = sprite->x + frameSprite->offsetXFlip;
-//                else vdpSprite->x = sprite->x + frameSprite->offsetX;
-//                vdpSprite->size = frameSprite->size;
-//                vdpSprite->attribut = attr;
-//                vdpSprite->link = ind++;
-//                vdpSprite++;
-//            }
-//
-//            // increment tile index in attribut field
-//            attr += frameSprite->numTile;
-//            // next
-//            frameSprite++;
-//            // next VDP sprite
-//            visibility >>= 1;
-//
-//#ifdef SPR_DEBUG
-//            logVDPSprite(ind - 1);
-//#endif // SPR_DEBUG
-//        }
-//    }
-//
-//    END_PROFIL(PROFIL_UPDATE_SPRITE_TABLE)
-//
-//    return vdpSprite;
-//}
 
 static void loadTiles(Sprite* sprite)
 {
@@ -2087,7 +2318,11 @@ static Sprite* sortSprite(Sprite* sprite)
     const s16 sdepth = sprite->depth;
 
 #ifdef SPR_DEBUG
+<<<<<<< HEAD
     //KLog_U2("Start depth compare for sprite #", getSpriteIndex(sprite), " VDP Sprite Ind=", sprite->VDPSpriteIndex);
+=======
+    KLog_U2("Start depth compare for sprite #", getSpriteIndex(sprite));
+>>>>>>> cb114acadc454440fcddd616d9a7dd5a693b1b13
 #endif // SPR_DEBUG
 
     // find position forward first
